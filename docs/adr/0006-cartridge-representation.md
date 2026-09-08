@@ -51,21 +51,25 @@ This is also the strongest argument for the primer's recommendation. The mapper 
 
 However, the polymorphism does not need to occur at every cartridge memory access. The CPU-visible address map is the same, while the mapper's state determines which physical storage an address resolves to. The selected offsets can therefore be derived when mapper state changes and then used by the ordinary cartridge access path. The hardware polymorphism remains encapsulated in the mapper while the steady-state read/write path operates on the resolved representation.
 
-The structural cost is more significant. A polymorphic mapper normally requires the cartridge to own the mapper through indirection, such as a base-class pointer. That introduces separate mapper allocation/ownership and means the cartridge's state is no longer necessarily contained entirely within the root machine object. This conflicts with **ADR 0003's Rule 1: copying the root machine object must copy the entire machine state**. A shallow copy of the root object would copy the pointer rather than the mapper object, producing shared mapper state rather than an independent machine.
+The structural cost is more significant. A polymorphic mapper normally requires the cartridge to own the mapper through indirection, such as a base-class pointer. That introduces separate mapper allocation and ownership, and means the cartridge's state is no longer contained entirely within the root machine object. This conflicts with **ADR 0003 rule 6 (ownership is by value)**: `shared_ptr` is forbidden, `unique_ptr` is permitted only on demonstrated need. The property the project actually depends on here (that copying the root machine object copies the entire machine state) is recorded under that rule as a consequence, "value ownership makes an in-process snapshot trivial."
 
-A function-pointer table has essentially the same structural tradeoff: it preserves runtime polymorphism but still introduces indirect ownership/state outside the value-contained machine object.
+The conflict is a dilemma rather than a single failure. Under `unique_ptr`, the machine stops being copyable: the copy constructor is deleted and an attempted copy is a compile error, so the snapshot property is lost outright. Under a raw pointer or `shared_ptr`, the machine remains copyable, but a copy duplicates the pointer rather than the mapper, so the two machines share cartridge state. A polymorphic mapper therefore forces a choice between a machine that cannot be copied and a machine whose copies alias their cartridges, and rule 6 forbids the second.
 
-**Rejected:** although this is a sound design and the primer's recommendation, its runtime-polymorphic ownership model conflicts with the project's value-semantics requirement for the machine root. The hardware polymorphism can instead be represented by a closed value-owned variant.
+The save-state requirements rule out the same design independently, since they forbid state that depends on pointers, references, or vtables. Serialising a polymorphic mapper requires a type tag written into the state file to record which derived mapper was live, a factory to reconstruct that type on load, and a downcast to restore its fields, reintroducing exactly what the requirement excludes. A closed variant requires the alternative index and the fields, both plain data, and the same restore path serves every mapper.
+
+A function-pointer table has essentially the same structural tradeoff: it preserves runtime polymorphism, but still places ownership outside the value-contained machine object and still puts pointers into serialised state.
+
+**Rejected:** although this is a sound design and the primer's recommendation, its ownership model cannot satisfy rule 6 and the machine-copy property simultaneously, and its serialised form depends on the pointer and vtable identity that the save-state requirements exclude. The hardware polymorphism can instead be represented by a closed value-owned variant.
 
 ### Alternative 2: Per-access variant visit
 
 The cartridge can store the mapper as a closed variant and visit it on every `read` and `write`. This preserves value semantics and avoids heap ownership, while making the mapper implementations explicit and exhaustive.
 
-The weakness is not that `visit` must be slower than a virtual call. For a small closed set, the generated dispatch can be comparable. The problem is **when the work occurs**. Every access must redispatch into the mapper and perform the address-resolution logic, even though the relevant mapping only changes when mapper state changes.
+The primary objection is that per-access dispatch does not correspond to the hardware. Per **Context fact 1**, the mapper does not participate in a read at all; a per-access visit therefore models an event the machine does not perform.
 
-That repeats work that can instead be performed once when the authoritative mapper register changes. The steady-state operation should be "use the mapping already derived from the current mapper state", not "re-derive which mapper behaviour applies for every access."
+The secondary objection is timing. The weakness is not that `visit` must be slower than a virtual call (for a small closed set the generated dispatch can be comparable) but **when the work occurs**. Every access redispatches into the mapper and repeats the address-resolution logic, even though the relevant mapping only changes when mapper state changes. That repeats work that can instead be performed once when the authoritative mapper register changes. The steady-state operation should be "use the mapping already derived from the current mapper state", not "re-derive which mapper behaviour applies for every access."
 
-**Rejected:** it preserves the desired ownership model but performs mapper dispatch and resolution at the wrong frequency.
+**Rejected:** it preserves the desired ownership model but performs mapper dispatch and resolution both where the hardware performs none and at the wrong frequency.
 
 ### Alternative 3: Compile-time polymorphism
 
@@ -91,6 +95,66 @@ Second, MBC1's mode register changes the meaning of the **fixed** `0x0000–0x3F
 
 ### Conclusion
 
-The chosen design therefore uses a **value-owned closed mapper variant with cached derived offsets**. The mapper variant represents the genuinely polymorphic hardware behaviour and preserves the machine's copyable value semantics. Mapper state changes recompute the address mapping once; ordinary accesses consume that derived mapping without redispatching the mapper.
+The chosen design therefore uses a **value-owned closed mapper variant with cached derived offsets**. The mapper variant represents the genuinely polymorphic hardware behaviour while keeping the cartridge's state inside the machine object, which yields two separate consequences the project requires: the machine remains copyable, so an in-process snapshot stays trivial, and its serialised form contains only plain data (the alternative index and the mapper's fields) with no type tag, factory, or downcast. Mapper state changes recompute the address mapping once; ordinary accesses consume that derived mapping without redispatching the mapper.
 
 This is a deliberate departure from the primer's polymorphic-interface recommendation, not a claim that polymorphic mappers are inherently inferior. The distinction is that the hardware requires **polymorphic state-transition behaviour**, while the steady-state cartridge access path does not require polymorphic dispatch on every access.
+
+
+## Consequences
+
+### Mapper bugs surface at write time, and are inspectable
+Because resolution happens when a register changes, a wrong mapping is a wrong set of cached offsets, present and observable between accesses rather than recomputed inside each one. The debugger should therefore expose the resolved offsets alongside the mapper registers: the pair makes a mapping bug a comparison rather than an investigation.
+
+### Not every window resolves to storage, and rule 4 survives that
+MBC3 maps its clock registers into the same address window the cartridge RAM occupies, selected by the same register that selects a RAM bank. A read from that window therefore does not always index an array.
+
+This does not require the read path to branch on mapper type, which rule 4 forbids. It requires the resolution cache to express *what the window currently resolves to*(a RAM offset, or a specific clock register, or nothing) as part of the resolved state. The read path then branches on resolved state, which is mapper-independent and computed once per register write, exactly as rule 3 intends. The rule is about not rediscovering which mapper is present, not about the absence of all branches.
+
+### Adding a mapper is an enumerated change
+A new alternative in the variant makes every exhaustive handling site a compile error until it is addressed. The polymorphic alternative has the opposite property: a missing override compiles and fails at runtime. This is a durable benefit of the chosen representation and is worth stating, because the cost of the variant (mapper code living near the shared write path) is visible while this benefit is not.
+
+### The machine stays copyable
+With no indirection in the cartridge, the value-semantics property recorded in ADR 0003 holds for a machine with any supported cartridge loaded. In-process snapshots and per-test machine instances continue to work without a cartridge-shaped exception.
+
+### A save state records authoritative mapper state and nothing derived
+The variant's active alternative and its registers are captured; the resolved offsets are not, and are recomputed on load by the same routine that recomputes them after a register write. There is no type tag beyond the alternative index, no factory, no downcast, and no pointer fixup.
+
+### A save state is meaningless without its ROM
+ROM bytes are supplied from outside, so a state file restores correctly only when paired with the cartridge it was taken from. The state format must therefore carry enough identifying information (a header-derived identifier or a content hash) for a mismatched pairing to be detected and refused rather than silently producing a machine that executes the wrong bytes. This is a requirement this ADR places on the save-state format decision, not a decision made here.
+
+### The RTC is the machine's only host-time dependency, and it enters as a parameter
+Rule 7 keeps determinism intact: nothing inside the core reads a clock, and a test or a replay can supply whatever time it likes. The cost is a parameter that most mappers ignore.
+
+The semantics of time passing while the emulator is not running (what a cartridge's clock should read after the machine is restored from a state taken a week ago) is deferred to the milestone that implements MBC3. It is a product decision as much as a hardware one.
+
+### The cost: mapper behaviour lives near the shared path
+
+Encapsulation is weaker than the polymorphic alternative would give. The tripwire, in the same form as ADR 0003's: mapper-specific logic belongs inside the functions operating on that mapper's own variant alternative. The shared write path may select and dispatch; it may not contain per-mapper behaviour. Logic describing what MBC1 does appearing outside MBC1's own code is the signal, and the fix is to move it, not to relax rule 5.
+
+### Deferred by this ADR
+- The register semantics of each mapper.
+- RTC persistence, and the meaning of elapsed real time across sessions.
+- The value observed when cartridge RAM is disabled, which is part of ADR 0004 rule 7's research debt.
+- The on-disk format for battery-backed RAM.
+
+## Status
+
+### Classification
+
+- **Cartridge structure and the cached-offset read path:** BLOCKING ARCHITECTURAL DECISION: accepted.
+- **Closed variant as the mapper representation:** PROVISIONAL.
+
+### Adjudication of the variant
+
+The variant representation is revisited only if the cartridge write path exceeds one per cent of profiled runtime in a release build. Below that threshold, the representation is not a performance question and is not reopened on speculation.
+
+If the threshold is ever crossed, the revisit considers alternatives that preserve value semantics (a resolved dispatch on a cached mapper-kind value, for instance) rather than reopening the polymorphic design, whose rejection rests on ownership and serialisation grounds that a profile cannot change.
+
+### What would reopen the structure
+
+A mapper within the project's declared scope whose CPU-visible mapping depends on something other than its own registers and the sizes of its ROM and RAM, that is, a mapping that cannot be resolved when a register is written because it depends on state only known at access time.
+
+### Review triggers
+- The milestone implementing MBC1, the first mapper with mode-dependent resolution of the fixed window.
+- The milestone implementing MBC3, which introduces both the clock and the window-resolves-to-a-register case.
+- The first profile of a release build, which supplies the number the variant's status depends on.
