@@ -120,3 +120,58 @@ Its cost arrives later because the shortcuts accumulate as address-specific exce
 
 ### What the alternatives have in common
 All four alternatives make an important part of the machine model implicit in some other mechanism: array special cases, runtime registration state, CPU-owned decoding, or polymorphic dispatch. The chosen contract instead makes the **bus the explicit authority for address decoding and access**, while keeping the access path compatible with ADR 0002's timing mechanism. That makes the architectural cost visible early rather than allowing it to emerge later as scattered special cases.
+
+## Consequences
+
+### The memory map exists in exactly one place
+Adding a region, changing a permission rule, or correcting a decode boundary is an edit to one function and one table. No component, tool, or test contains a second copy of the map, and there is no call site that can drift from it. This is the payoff for which the four alternatives were rejected.
+
+### Rule 7 creates research debt, not implementation debt
+The contract requires that every unanswered or denied read return a documented value. The values themselves are not yet known: the prohibited region's behaviour, what a locked VRAM or OAM read returns, and the read-back of unimplemented I/O bits all have to be sourced from hardware documentation and confirmed by test at the milestone that implements each region. Some of them may be mode-dependent.
+
+Until each value is sourced, principle P14 applies: the code is loud, and the gap is visible. A plausible constant returned quietly is a defect under this contract, not a placeholder. These are expected to be among the first entries in `docs/known-shortcuts.md`, and each is retired by citing a source and a passing test, not by someone deciding a value looks right.
+
+### Echo RAM's truncation falls out of decode order
+The last 512 bytes of work RAM have no echo name, and this requires no special rule. The incomplete decoding would mirror the full region, but OAM, the I/O registers, HRAM, and `IE` claim the addresses where the remainder would have appeared, and they win. Anything in the implementation that handles this as a special case is modelling the symptom rather than the mechanism.
+
+### The PPU sits on the CPU's read path
+Every CPU access to VRAM or OAM asks the PPU whether the access is permitted, per rule 6. That query is on the hottest path in the emulator, alongside the advance mechanism named in ADR 0002. It must be a cheap examination of already-computed state, not a recomputation, not a virtual call, and not a search.
+
+### The debug path cannot return a plain byte
+Rule 10 requires the debug path to distinguish "no responder" from data. A read that can only return a byte cannot express that distinction, so the debug read's result is a value that may be absent, and every consumer (the debugger, the memory viewer, the trace writer, the disassembler) handles absence explicitly.
+
+This is the first place in the project where an API shape is dictated by an accuracy principle rather than by convenience, and it is deliberate: a debugger that invents plausible bytes for unmapped addresses will eventually cost more hours than the branch costs to write.
+
+### The boot ROM overlay is machine state, and the image is not
+The overlay latch is part of the machine's state and is saved and restored with it. The boot image itself is not: like cartridge ROM, it is supplied from outside and reattached on load. A state captured while the overlay is active therefore restores correctly only when the same boot image is supplied, and the save-state design must say so rather than discovering it.
+
+### Open question: the CPU test harness and the region map
+The SM83 per-opcode suite supplies arbitrary memory contents across the address space and expects reads and writes to behave uniformly. This contract makes the region map fixed, so uniform behaviour cannot come from bypassing the decode.
+
+The presumed resolution, consistent with ADR 0003 rule 9, is that the harness installs test-oriented components which store and return bytes at their own addresses, leaving the map and the routing untouched. Whether that covers every address the suite exercises (the prohibited region in particular, which by rule 2 has no responder at all) is not known until the suite is fetched and examined.
+
+This is recorded as an open question to be settled when the CPU test harness is built. It is not settled by relaxing the contract, and no test-only path through the bus is introduced.
+
+### Deferred by this ADR
+- **What the CPU observes during an OAM DMA transfer.** Deferred by ADR 0002, and constrained by this one: it is a question about responders and permission, and its answer is expressed within this contract rather than as a special case inside the CPU.
+- **The behaviour of individual I/O registers,** which belongs to each peripheral.
+- **Cartridge mapping behaviour,** which belongs to ADR 0006.
+
+## Status
+
+### Classification
+
+**Bus contract: regions, access paths, and permission semantics:** BLOCKING ARCHITECTURAL DECISION: accepted.
+
+### What would reopen this
+The discovery of a hardware behaviour that cannot be expressed as *address → region → responder → permission → value*: specifically, a case where what answers an address depends on something other than the address and the state of the owning component.
+
+Candidates to watch, none of which is currently believed to break the model: the CPU's view of the bus during a DMA transfer, and any behaviour where two responders drive the data lines simultaneously.
+
+### Unresolved work items, not decision gaps
+The per-region values required by rule 7 are unsourced. This is a research task with a known method, not an undecided part of the contract.
+
+### Review triggers
+- The milestone that implements VRAM and OAM locking -> the first real exercise of rule 6.
+- The milestone that implements OAM DMA -> the first candidate to strain the model.
+- The first time a rule 7 value must be sourced, which tests whether the discipline holds under the temptation to pick something plausible.
