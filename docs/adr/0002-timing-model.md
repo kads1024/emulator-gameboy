@@ -76,15 +76,15 @@ The following are IMPLEMENTATION DETAIL and are not decided here. They are recor
 - **The order in which timed components are advanced within one tick.** The rule is that the order is fixed and documented; which order is correct cannot be determined until there are peripherals whose interaction can be observed. Decided when the second timed peripheral exists.
 - **Where the OAM DMA engine sits in that order,** and the mechanism by which its byte moves are performed given that no component may reference another. Decided at the milestone that introduces DMA.
 
-## Alternative 1: Instruction-stepped timing
+### Alternative 1: Instruction-stepped ("catch-up")
 
-Under an instruction-stepped model, the CPU executes the entire instruction first and peripherals are advanced afterward based on the instruction's total cycle count.
+Instruction-stepped timing executes an entire CPU instruction first and advances the peripherals afterward by the instruction's total elapsed time. All bus accesses performed during the instruction therefore occur before the peripheral catch-up for that instruction.
 
-**Q1:** I think that under instruction-stepped execution, the peripherals have experienced 0 M-cycles when the M3 access happens, because they only advance after the instruction finishes.
+This approach is attractive because it is simple to implement, fast, and requires no restructuring of a straightforward instruction interpreter. It has broad compatibility with commercial software and is commonly recommended as a starting point for emulator development.
 
-**Q2:** The timer and PPU seem like the obvious candidates because they change continuously and their state can be observed by the CPU.
+It is rejected empirically by Blargg's `mem_timing` and `mem_timing-2` tests. These tests align the timer relative to the instruction under test by resetting the divider and padding with a known number of cycles, then repeat the test with the alignment shifted. The observable is the alignment at which the value read from `TIMA` (`$FF05`) changes. Because TIMA's fastest rate increments once every four M-cycles, that boundary reveals the M-cycle at which the access occurred. Under instruction-stepped timing, every access in an instruction occurs at the same emulated timestamp, `t0`, so the k-th access is early by exactly `k` M-cycles relative to the hardware timing model, which performs that access at `t0 + k` M-cycles. The error therefore grows with the access's position within the instruction, including the opcode fetch.
 
-**Q3:** A CPU write to a peripheral control register should affect the peripheral at that point in the instruction, so the remaining M-cycles should run with the new state. Instruction-stepped execution delays the peripheral's progression until after the instruction.
+It is also rejected structurally by the SM83 per-opcode tests, which specify the exact bus transactions and their cycle positions. Instruction-stepped execution has no representation of when within an instruction an access occurs: every access shares the instruction's timestamp. The required cycle positions could therefore only be reproduced by consulting a per-opcode timing/transaction table, which would validate the table rather than the machine and would violate the Decision section's prohibition on runtime duration tables. The SM83 tests use flat memory, so the values returned by those transactions may still be correct; what is incorrect is the position of each transaction in time.
 
-**Q4:** The SM83 per-opcode tests seem to be the structural oracle because they specify the exact bus transactions and their cycle positions. An instruction-stepped model can't naturally expose the intermediate timing/state at those positions.
+This decision would be reversed only if a stronger hardware-derived oracle demonstrated that the relevant bus accesses and peripheral observations occur at instruction-level rather than M-cycle-level positions.
 
