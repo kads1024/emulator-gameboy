@@ -80,16 +80,20 @@ A 64 KiB byte array is treated as the machine's memory, with special cases added
 
 The mechanical failure is that the array does not naturally model **absence of a responder** or **temporary inaccessibility**. Those cases become additional address-specific conditionals layered around the array. Echo RAM can be implemented without duplicated storage by transforming the address before indexing, but once address decoding and device-specific behaviour are required around the array, the design is no longer meaningfully "flat." The special cases become an increasingly large second memory model.
 
-This also conflicts with the principle that bus behaviour, rather than individual consumers, owns address decoding and access semantics (Rule 4).
+This also conflicts with the principle that bus behaviour, rather than individual consumers, owns address decoding and access semantics (Rule 1).
 
 ### Alternative 2: Runtime device registry
-Components register the address ranges they claim, and each access searches the registry for the responder.
+Components register the address ranges they claim, and each access resolves the responder through the registry.
 
-This represents unmapped addresses naturally: no registered range matches. Temporary inaccessibility can also be represented by a registered responder declining the access or by changing the active mapping.
+This represents unmapped addresses naturally: no registered range matches. Temporary inaccessibility can also be represented by a registered responder declining the access or by changing the active mapping. Echo RAM does not require duplicated storage either, since the selected device can normalize the address before accessing its underlying storage.
 
-The mechanical failure is that address resolution becomes runtime work on every access. The bus must search or otherwise dispatch through a dynamic collection before the actual access can occur. That adds machinery directly to the path used for every memory access, even though the memory map is largely static.
+The mechanical failure is that registration moves the machine's topology into runtime state. Which component answers which address becomes data established by a sequence of registration calls rather than structure fixed by the design. A field-by-field serialiser can then no longer reconstruct the machine from component state alone: it must also know what was registered, by whom, and in what order. That is P12.
 
-Echo RAM itself does not require duplicated storage, since the selected device can normalize the address before accessing its underlying storage. The cost is instead in the runtime resolution mechanism.
+This is the same failure mode as the callback alternative rejected in ADR 0003, wearing a different disguise. The two designs look unrelated (one dispatches on address, the other on event) but both establish at runtime a relationship the hardware fixes at design time, and both defeat reconstruction from component state for the same reason. A principle that catches two superficially unrelated designs is a real constraint rather than a stylistic preference, which is why the correspondence is worth stating rather than leaving for the reader to notice.
+
+Secondarily, the registry introduces dynamism into a machine whose memory map is fixed and known in advance. That is an abstraction with no hardware counterpart, which is P10.
+
+The obvious rebuttal is that the usual objection to a registry (that resolution costs runtime work on every access) is easily answered: index a 256-entry page table by the high byte of the address and resolution becomes a single array lookup, no worse than the flat array. That rebuttal is correct, and it is why the rejection above does not rest on resolution cost. The page table still has to be populated, and populating it is registration. The topology remains established at runtime, and the serialisation problem is unchanged.
 
 ### Alternative 3: Decode in the CPU
 The CPU determines which component owns an address and calls that component directly, with no bus object.
@@ -98,7 +102,7 @@ This can be straightforward and fast for a CPU-centric emulator, and it makes th
 
 The mechanical failure is that address decoding becomes a CPU responsibility. Non-CPU components that need bus accesses must either duplicate the decoding logic or route those accesses through some other mechanism. The memory map therefore becomes distributed rather than having one authoritative decoder.
 
-This directly conflicts with ADR 0003's rule that **address decoding belongs to the bus, not to the component performing the access** (Rule 1). It also makes the access mechanism harder to use as the common synchronization point required by ADR 0002.
+This directly conflicts with the rule that **address decoding belongs to the bus, not to the component performing the access** (Rule 1). It is also structurally unavailable under ADR 0003: a CPU that decodes must be able to reach every peripheral it might address, which means holding handles to components it does not own, and ADR 0003's Rule 2 forbids exactly that. Separately, it makes the access mechanism harder to use as the common synchronization point required by ADR 0002.
 
 ### Alternative 4: Polymorphic region objects
 Each memory region derives from a common interface providing virtual `read` and `write` operations, and the bus holds a collection of those regions.
@@ -114,4 +118,5 @@ Alternative 1 is genuinely the fastest route to a machine that boots. A byte arr
 
 Its cost arrives later because the shortcuts accumulate as address-specific exceptions. Echoes, unmapped addresses, temporarily inaccessible resources, cartridge mapping, and device ownership all become special cases around what was originally supposed to be a simple array. By the time accurate timing and bus-visible behaviour matter, the emulator has to disentangle those assumptions or duplicate the memory model.
 
-The four alternatives therefore all make an important part of the machine model implicit in some other mechanism: array special cases, runtime registry state, CPU-owned decoding, or polymorphic dispatch. The chosen contract instead makes the **bus the explicit authority for address decoding and access**, while keeping the access path compatible with ADR 0002's timing mechanism. That makes the architectural cost visible early rather than allowing it to emerge later as scattered special cases.
+### What the alternatives have in common
+All four alternatives make an important part of the machine model implicit in some other mechanism: array special cases, runtime registration state, CPU-owned decoding, or polymorphic dispatch. The chosen contract instead makes the **bus the explicit authority for address decoding and access**, while keeping the access path compatible with ADR 0002's timing mechanism. That makes the architectural cost visible early rather than allowing it to emerge later as scattered special cases.
