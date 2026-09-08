@@ -51,7 +51,7 @@ The behaviour of individual I/O registers, which belongs to each peripheral. Car
 
 Region boundaries are named constants, never literals, per `docs/scope.md` section 4 accommodation 2.
 
-**4. Echo RAM is decode, not duplication.** The region exists because the work RAM's selection logic ignores the address bit that distinguishes the two ranges, so the same 8 KiB of storage answers to both sets of names. The echo region resolves to the same storage as the region it mirrors. There is no second array and no copying. A write through one set of names is observable through the other because they are the same bytes.
+**4. Echo RAM is decode, not duplication.** The region exists because the work RAM's selection logic ignores A13: the same 8 KiB answers across $E000–$FFFF as well as at $C000–$DFFF. Only the first 7,680 bytes of that mirror are ever observable, because OAM, the I/O registers, HRAM, and IE are decoded ahead of WRAM and claim the addresses at which the last 512 bytes would otherwise have appeared. The echo region resolves to the same storage as the region it mirrors. There is no second array and no copying. A write through one set of names is observable through the other because they are the same bytes.
 
 **5. Three access paths exist, with these guarantees:**
 | | CPU path | Component path | Debug path |
@@ -72,3 +72,46 @@ Region boundaries are named constants, never literals, per `docs/scope.md` secti
 **10. The debug path never lies.** It performs no access that changes machine state, and where an address has no responder it reports that fact distinguishably rather than returning a value that looks like data. A debugger that fabricates plausible bytes is worse than one that says "nothing here."
 
 **11. The component path performs no permission checks.** It exists precisely because the component asking is the one that owns or is authorised to touch the resource, and applying CPU-facing rules to it would be modelling a restriction the hardware does not impose.
+
+## Alternatives considered
+
+### Alternative 1: Flat array with special-cased I/O
+A 64 KiB byte array is treated as the machine's memory, with special cases added for cartridge addresses and I/O addresses. This is attractive because it is simple, fast, easy to debug, and close to the model used by many first emulators. It is also a genuinely effective way to get real software running quickly.
+
+The mechanical failure is that the array does not naturally model **absence of a responder** or **temporary inaccessibility**. Those cases become additional address-specific conditionals layered around the array. Echo RAM can be implemented without duplicated storage by transforming the address before indexing, but once address decoding and device-specific behaviour are required around the array, the design is no longer meaningfully "flat." The special cases become an increasingly large second memory model.
+
+This also conflicts with the principle that bus behaviour, rather than individual consumers, owns address decoding and access semantics (Rule 4).
+
+### Alternative 2: Runtime device registry
+Components register the address ranges they claim, and each access searches the registry for the responder.
+
+This represents unmapped addresses naturally: no registered range matches. Temporary inaccessibility can also be represented by a registered responder declining the access or by changing the active mapping.
+
+The mechanical failure is that address resolution becomes runtime work on every access. The bus must search or otherwise dispatch through a dynamic collection before the actual access can occur. That adds machinery directly to the path used for every memory access, even though the memory map is largely static.
+
+Echo RAM itself does not require duplicated storage, since the selected device can normalize the address before accessing its underlying storage. The cost is instead in the runtime resolution mechanism.
+
+### Alternative 3: Decode in the CPU
+The CPU determines which component owns an address and calls that component directly, with no bus object.
+
+This can be straightforward and fast for a CPU-centric emulator, and it makes the access path explicit at each call site.
+
+The mechanical failure is that address decoding becomes a CPU responsibility. Non-CPU components that need bus accesses must either duplicate the decoding logic or route those accesses through some other mechanism. The memory map therefore becomes distributed rather than having one authoritative decoder.
+
+This directly conflicts with ADR 0003's rule that **address decoding belongs to the bus, not to the component performing the access** (Rule 1). It also makes the access mechanism harder to use as the common synchronization point required by ADR 0002.
+
+### Alternative 4: Polymorphic region objects
+Each memory region derives from a common interface providing virtual `read` and `write` operations, and the bus holds a collection of those regions.
+
+This models different responders cleanly and can represent unmapped addresses by having no matching region. Temporary inaccessibility can be represented by a region refusing an access or by its availability changing.
+
+Echo RAM can be implemented without duplicated storage if the echo region forwards or translates its address to the underlying WRAM storage. However, every access requires region lookup followed by an indirect or virtual call.
+
+The mechanical failure is therefore on the hottest path: every bus access pays for region dispatch, while ADR 0002 makes the bus access/advance mechanism a central synchronization point that is already exercised extremely frequently. Virtual dispatch and dynamic region resolution add overhead precisely where the architecture requires a cheap, predictable operation.
+
+### Steel-man: why the flat array still wins initially
+Alternative 1 is genuinely the fastest route to a machine that boots. A byte array plus a handful of special cases is easy to implement, has excellent locality, and avoids building an abstraction before there is enough emulator behaviour to justify it. That is why many successful emulators use some variation of it.
+
+Its cost arrives later because the shortcuts accumulate as address-specific exceptions. Echoes, unmapped addresses, temporarily inaccessible resources, cartridge mapping, and device ownership all become special cases around what was originally supposed to be a simple array. By the time accurate timing and bus-visible behaviour matter, the emulator has to disentangle those assumptions or duplicate the memory model.
+
+The four alternatives therefore all make an important part of the machine model implicit in some other mechanism: array special cases, runtime registry state, CPU-owned decoding, or polymorphic dispatch. The chosen contract instead makes the **bus the explicit authority for address decoding and access**, while keeping the access path compatible with ADR 0002's timing mechanism. That makes the architectural cost visible early rather than allowing it to emerge later as scattered special cases.
