@@ -42,3 +42,36 @@ Their existence is the reason the ordering sub-decision can be marked provisiona
 ### Out of scope for this ADR
 
 This ADR does not decide the PPU's rendering strategy, the save-state format, or the frontend's frame pacing. It decides only how time advances inside the core and what triggers that advance.
+
+## Decision
+
+Time advances in M-cycle quanta, triggered by the CPU's bus operations. Concretely:
+
+**1. The unit of advance is one M-cycle.** Every advance moves global time forward by exactly four T-cycles. There is no partial advance and no variable-size advance.
+
+**2. Exactly one mechanism performs the advance.** A single function moves time forward and advances every timed component. Timing semantics are never duplicated across opcode implementations, peripherals, or call sites.
+
+**3. Time advances before the access it pays for.** A bus operation advances the clock by one M-cycle and then performs the read or write. Reads and writes follow the same ordering.
+
+**4. The bus exposes exactly three timed entry points, and each advances exactly one M-cycle:**
+| Entry point | Effect |
+|---|---|
+| `read(addr)` | advance one M-cycle, then perform the routed read, return the value |
+| `write(addr, value)` | advance one M-cycle, then perform the routed write |
+| `tick()` | advance one M-cycle, perform no access |
+
+**5. Internal CPU cycles are explicit and unbatched.** Any cycle an instruction consumes without a bus access consumes `tick()` at the point in the instruction where the hardware consumes it. Internal cycles are never collected at the start or end of an instruction, and never folded into an adjacent access.
+
+**6. The CPU is the sole caller of the timed entry points.** Nothing else in the core calls them. A component that appears to need bus access — notably the OAM DMA engine, which is driven by the clock rather than being a consumer of it — uses the untimed component access path. If a second caller advanced time, a single M-cycle would advance global time more than once.
+
+**7. Interrupt dispatch is composed of the same primitives.** Its stack writes are timed writes through the CPU path; its idle cycles are `tick()`. Dispatch has no special timing implementation of its own.
+
+**8. Instruction duration is emergent.** How long an instruction takes is the sum of the advances it triggers. No duration table is consulted at runtime, and no opcode implementation reports a cycle count.
+
+**9. Components receive time in M-cycle quanta and subdivide internally.** A component whose hardware resolution is finer than an M-cycle — the PPU, which works in dots — receives four dots at once and advances itself through them internally. This defines the accuracy ceiling of the model: no component can be observed at a T-cycle boundary interior to an M-cycle.
+
+### Deliberately deferred
+
+The following are IMPLEMENTATION DETAIL and are not decided here. They are recorded so a future reader knows the silence is deliberate.
+- **The order in which timed components are advanced within one tick.** The rule is that the order is fixed and documented; which order is correct cannot be determined until there are peripherals whose interaction can be observed. Decided when the second timed peripheral exists.
+- **Where the OAM DMA engine sits in that order,** and the mechanism by which its byte moves are performed given that no component may reference another. Decided at the milestone that introduces DMA.
