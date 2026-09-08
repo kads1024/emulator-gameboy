@@ -31,11 +31,12 @@ The timing model determines the shape of the CPU's execution path, the signature
 
 ### Available oracles
 
-Three test resources can decide questions about timing empirically rather than by
+Four test resources can decide questions about timing empirically rather than by
 argument:
-- The **SM83 per-opcode test suite**, which supplies initial state, final state, and the ordered list of bus transactions with their cycle positions. It validates not only what an instruction does but when each access happens.
+- The **SM83 per-opcode test suite**, which supplies initial state, final state, and the ordered list of bus transactions with their cycle positions. It validates not only what an instruction does but which M-cycle of the instruction each access belongs to.
 - **Blargg `mem_timing`** and **`mem_timing-2`**, which test when within an instruction memory is accessed.
 - **Blargg `instr_timing`**, which tests total instruction durations.
+- The **power-on-anchored boot-ROM handoff comparison**, which establishes absolute phase because its anchor is initialization rather than a CPU access.
 
 The SM83 and Blargg suites can settle whether the emulator uses an M-cycle-interleaved timing model rather than instruction-stepped timing. The power-on-anchored boot-ROM observation can settle the tick/access ordering itself, because it establishes an absolute phase reference rather than anchoring timing solely to CPU accesses.
 
@@ -86,7 +87,7 @@ This approach is attractive because it is simple to implement, fast, and require
 
 The analysis predicts that instruction-stepped timing fails Blargg's `mem_timing` and `mem_timing-2` tests. These tests align the timer relative to the instruction under test by resetting the divider and padding with a known number of cycles, then repeat the test with the alignment shifted. The observable is the alignment at which the value read from `TIMA` (`$FF05`) changes. Because TIMA's fastest rate increments once every four M-cycles, that boundary reveals the M-cycle at which the access occurred.
 
-Under instruction-stepped timing, every access in an instruction occurs at the same emulated timestamp, `t0`. Relative to the model adopted in this ADR, the k-th access occurs at `t0 + k` M-cycles; therefore instruction-stepped timing's timing error is exactly `k` M-cycles under that ordering. However, the rejection of instruction-stepped timing does not depend on whether the correct ordering is `t0 + k` or `t0 + (k−1)`: under either ordering, instruction-stepped timing performs every access at a single timestamp, so its error is `k` or `k−1` M-cycles and grows with the access's position within the instruction. The error affects every access after the first under either ordering, and under the ordering adopted here it displaces the opcode fetch as well.
+Under instruction-stepped timing, every access in an instruction occurs at the same emulated timestamp, `t0`. Relative to the model adopted in this ADR, the k-th access occurs at `t0 + k` M-cycles; therefore its timing error is exactly `k` M-cycles under that ordering. However, the rejection of instruction-stepped timing does not depend on whether the correct ordering is `t0 + k` or `t0 + (k−1)`: under either ordering, instruction-stepped timing performs every access at a single timestamp, so its error is `k` or `k−1` M-cycles and grows with the access's position within the instruction. The error affects every access after the first under either ordering, and under the ordering adopted here it displaces the opcode fetch as well.
 
 It is also structurally incompatible with the SM83 per-opcode tests, which specify the exact bus transactions and which M-cycle of the instruction each transaction belongs to. Instruction-stepped execution has no representation of when within an instruction an access occurs: every access shares the instruction's timestamp. The required cycle positions could therefore only be reproduced by consulting a per-opcode timing/transaction table, which would validate the table rather than the machine and would violate rule 8 of the Decision section. The SM83 tests use flat memory, so the values returned by those transactions may still be correct; what is incorrect is the position of each transaction in time.
 
