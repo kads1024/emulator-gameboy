@@ -75,3 +75,16 @@ Time advances in M-cycle quanta, triggered by the CPU's bus operations. Concrete
 The following are IMPLEMENTATION DETAIL and are not decided here. They are recorded so a future reader knows the silence is deliberate.
 - **The order in which timed components are advanced within one tick.** The rule is that the order is fixed and documented; which order is correct cannot be determined until there are peripherals whose interaction can be observed. Decided when the second timed peripheral exists.
 - **Where the OAM DMA engine sits in that order,** and the mechanism by which its byte moves are performed given that no component may reference another. Decided at the milestone that introduces DMA.
+
+## Alternative 1: Instruction-stepped timing
+
+Under an instruction-stepped model, the CPU executes the entire instruction first and peripherals are advanced afterward based on the instruction's total cycle count.
+
+**Q1:** I think that under instruction-stepped execution, the peripherals have experienced 0 M-cycles when the M3 access happens, because they only advance after the instruction finishes.
+
+**Q2:** The timer and PPU seem like the obvious candidates because they change continuously and their state can be observed by the CPU.
+
+**Q3:** A CPU write to a peripheral control register should affect the peripheral at that point in the instruction, so the remaining M-cycles should run with the new state. Instruction-stepped execution delays the peripheral's progression until after the instruction.
+
+**Q4:** The SM83 per-opcode tests seem to be the structural oracle because they specify the exact bus transactions and their cycle positions. An instruction-stepped model can't naturally expose the intermediate timing/state at those positions.
+
