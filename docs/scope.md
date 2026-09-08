@@ -39,7 +39,7 @@ The following are properties of the target hardware and are named constants in t
 Each exclusion carries its reason. The reason is the part that matters: it is what lets a future proposal be evaluated even if it is not named here.
 
 **Game Boy Color.** It forks the PPU, the bus, and CPU timing simultaneously. A partial CGB implementation is worse than none, it produces games that *almost* work and a compatibility list that cannot be trusted.
-- Cartridges marked CGB-only (`$0143 == $C0`) are detected at load and refused with a clear error. This is a deliberate refusal, not a failure to load.
+- Cartridges marked CGB-only (`$0143 == $C0`) are detected at load and refused with a clear error. This is a product decision, not hardware fidelity: real DMG hardware would run such a cartridge and let its own code display an incompatibility screen. Refusing at load is chosen because a clear error is more useful than an unexplained screen, and because it keeps the compatibility list honest.
 - Cartridges marked CGB-enhanced (`$0143 == $80`) run their DMG code path. This is not a compromise or a degraded mode: those cartridges contain a DMG path precisely so they can run on DMG hardware, and running it is what this hardware target does.
 
 **Super Game Boy.** A separate product. It requires a command protocol layered over the joypad register and an SNES host to interpret it.
@@ -62,7 +62,7 @@ Each exclusion carries its reason. The reason is the part that matters: it is wh
 - No review comment may block a design because it is CGB-hostile.
 
 Exactly three accommodations are permitted, each because it has independent justification and costs nothing:
-1. The core framebuffer carries palette indices, not RGB (see section 6).
+1. The core framebuffer carries post-palette shade indices, not RGB (see section 6).
 2. Memory region sizes are named constants.
 3. The master clock frequency is a named constant.
 
@@ -82,6 +82,8 @@ These are distinct from debt. They have no removal milestone because they are co
 - External-clock transfers never complete, because no external clock exists.
 
 This is the behavior of a real Game Boy with nothing in the link port. It is not a shortcut, not a stub, and not a defect.
+
+Adding an entry to this section requires an ADR that shows the behavior is what real hardware does under the same conditions. A behavior that is merely convenient, unimplemented, or approximate belongs in `docs/known-shortcuts.md` with a removal milestone, not here.
 
 ## 6. Framebuffer contract
 
