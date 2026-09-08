@@ -40,15 +40,15 @@ The exact grouping of components beneath the bus, the mechanism by which OAM DMA
 ## Alternatives considered
 
 ### Alternative 1: Back-references
-
 Each component holds a reference to the bus or to whichever sibling components it needs. This is attractive because the first few components can call each other directly: the CPU can ask the bus for memory, a peripheral can signal the interrupt controller, and there is little routing code.
 
 The mechanical failure appears when the machine is serialised. The object graph is no longer a tree: the serialiser cannot simply walk ownership edges because a component may point back to an ancestor or sideways to a sibling. It must either track object identity and detect cycles or maintain special knowledge of which references are ownership and which are merely links. That is additional machinery around a state that is otherwise fully enumerable by value.
 
+The obvious reply is that the back-references need not be serialised at all: they are structure rather than state, and can be rebuilt during construction when a state is loaded. That reply is correct, but reconstruction relocates the cost rather than removing it. Every component added from then on carries a fixup site that must be remembered at load time; a forgotten fixup produces a dangling reference or a silent alias rather than a compile error; and the correctness of save states becomes a property of a checklist maintained by hand rather than a property of the type system. Serialisation is therefore the supporting argument against this alternative, not the decisive one.
+
 More importantly, a back-reference to the bus makes ADR 0002 rule 6 unenforceable. A component can directly invoke a timed bus entry point, so the compiler cannot prevent a second caller from advancing the clock and then performing the access. The resulting runtime symptom is that one instruction can advance the machine twice for a single logical access, causing later CPU, timer, PPU, or interrupt state to appear one M-cycle out of phase.
 
 ### Alternative 2: Shared ownership
-
 Components are held through `shared_ptr`, allowing the object graph to retain whichever references are convenient. This is attractive because lifetime management appears automatic: a component can keep another component alive without deciding which object owns it.
 
 The mechanical failure is that the resulting graph is not a serialization graph. `shared_ptr` represents lifetime relationships, not the machine's state, so a field-by-field serialiser cannot follow every pointer as state without either duplicating shared objects or maintaining an identity table to avoid writing the same state more than once. Cycles also require special handling. The lifetime mechanism therefore becomes part of the save-state traversal even though ownership itself is supposed to be a fixed property of the machine.
@@ -56,19 +56,17 @@ The mechanical failure is that the resulting graph is not a serialization graph.
 Shared ownership also does not prevent components from retaining a `shared_ptr` to the bus. Once they have that pointer, the timed bus entry points are reachable from multiple callers and ADR 0002 rule 6 cannot be mechanically enforced. The runtime failure is the same class of double-ticking: an access path advances time outside the single machine-level access sequence and the observable state drifts out of phase.
 
 ### Alternative 3: Callback registration
-
 Components register callbacks with the components that need to react to them. This is genuinely pleasant for the first few components because the producer does not need to know the consumer's concrete type beyond the callback contract. An interrupt-producing peripheral, for example, can register a notification without carrying an explicit reference to the interrupt controller.
 
-The mechanical failure is that the machine's communication topology moves into runtime registration state. A field-by-field serialiser cannot reconstruct the machine solely by walking component state because the callbacks are executable relationships rather than serialisable values. It must separately know which callbacks exist, in what order they were registered, and how to rebuild them after loading a state.
+The mechanical failure is that the machine's communication topology moves into runtime registration state. A field-by-field serialiser cannot reconstruct the machine solely by walking component state because the callbacks are executable relationships rather than serialisable values. It must separately know which callbacks exist, in what order they were registered, and how to rebuild them after loading a state. This is the failure `docs/architecture.md` P12 names directly: state living only in a lambda capture is state that is not reachable from the machine root, and P12 already records it as a review failure.
 
 Callbacks also provide an indirect path to the bus. A callback invoked by a component can perform a bus access or cause another callback to do so, so the compiler cannot establish that the timed bus entry points have exactly one caller. The runtime failure is an access occurring from inside a notification path, potentially advancing the clock in the middle of another component's operation rather than at the machine's defined access boundary.
 
 ### Alternative 4: Global state
-
 The machine's components are globals or singletons, allowing any component to reach any other component without carrying references. This is the simplest model for the first few components: there is no construction graph and no routing code, and a component can immediately access whatever machine state it needs.
 
 The mechanical failure is that there is no machine instance to traverse independently. A field-by-field serialiser cannot represent two machines' states separately because the state being serialised is process-global. Running two independent Game Boy instances in the same process therefore requires duplicating or virtualising the globals, defeating the model.
 
 Global state also makes ADR 0002 rule 6 unenforceable because any component can reach the global bus and its timed entry points. The runtime failure is that unrelated execution paths can perform timed accesses without passing through the machine's single sequencing point, producing nondeterministic or incorrectly phased state changes.
 
-All four alternatives make communication relationships separate from ownership: components can retain, register, or globally discover paths to things they do not own. That turns the machine from a tree of state into a graph of state plus links, callbacks, or global access. The chosen model keeps ownership as the only structural relationship and makes component-to-component work explicit at their nearest common owner, leaving the machine state directly enumerable and the timed bus entry points unreachable from components.
+All four alternatives make communication relationships separate from ownership: components can retain, register, or globally discover paths to things they do not own. That turns the machine from a tree of state into a graph of state plus links, callbacks, or global access. The chosen model keeps ownership as the only structural relationship, which is `docs/architecture.md` P8, and makes component-to-component work explicit at their nearest common owner, leaving the machine state directly enumerable and the timed bus entry points unreachable from components.
