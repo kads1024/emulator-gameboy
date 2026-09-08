@@ -70,3 +70,61 @@ The mechanical failure is that there is no machine instance to traverse independ
 Global state also makes ADR 0002 rule 6 unenforceable because any component can reach the global bus and its timed entry points. The runtime failure is that unrelated execution paths can perform timed accesses without passing through the machine's single sequencing point, producing nondeterministic or incorrectly phased state changes.
 
 All four alternatives make communication relationships separate from ownership: components can retain, register, or globally discover paths to things they do not own. That turns the machine from a tree of state into a graph of state plus links, callbacks, or global access. The chosen model keeps ownership as the only structural relationship, which is `docs/architecture.md` P8, and makes component-to-component work explicit at their nearest common owner, leaving the machine state directly enumerable and the timed bus entry points unreachable from components.
+
+## Consequences
+
+### Ownership is the only structural relationship, so the machine is a tree of values
+Serialising the machine means walking ownership edges and writing fields. There is no identity table, no cycle detection, no pointer fixup, and no reconstruction step on load. This is the payoff for which the four alternatives were rejected, and it is what makes the save-state requirements achievable without machinery.
+
+### A component receives dependencies as parameters, never as members
+Rule 2 forbids a component from *storing* a reference to another. It does not forbid one from *receiving* one for the duration of a call. The CPU is stepped with the bus supplied as an explicit parameter; it holds nothing between calls. This distinction is the whole of rule 3 and it is what keeps the design usable.
+
+### Worked example: OAM DMA writing into OAM
+DMA and the PPU are siblings under the bus, and OAM belongs to the PPU. Under rule 7 the DMA engine cannot write into OAM, and under rule 2 it cannot hold a handle to the PPU.
+
+The mechanism is deferred by ADR 0002, but this ADR fixes its shape: the DMA component owns only the schedule (whether a transfer is active, its source page, and its current index) and the byte movement is performed by the nearest common owner, which reads the source through the component access path and writes the destination through the PPU's component access path. Neither component learns the other exists.
+
+This also matches the hardware: the DMA controller is a bus master, and OAM is a device at the other end of the transfer. Nothing on the real machine gives the DMA unit a private channel to the PPU either.
+
+### Worked example: the APU's frame sequencer and the timer's counter
+The APU's frame sequencer is clocked by a bit of the same internal counter the timer exposes as `DIV`. Two siblings, one genuinely dependent on the other's internal state, with a coupling that is documented hardware behaviour rather than an implementation artefact.
+
+Rule 7 says the owner mediates. But the first tool is not mediation, it is to ask whether the ownership assignment is right. The counter that drives both the timer's increments and the sequencer's steps is one counter in hardware; if it is modelled as state owned by whichever component the owner can feed to both, the coupling stops being a sibling interaction at all. The same reasoning that showed VRAM belongs to the PPU applies here.
+
+This is recorded as the first real test of rule 7, to be settled at the milestone that implements the APU, with ownership reassignment tried before mediation and mediation tried before amending this ADR.
+
+### Worked example: interrupt dispatch reading pending state
+The CPU must know whether `IE & IF` is non-zero in order to decide whether to dispatch, and that decision is not itself a memory access performed by the program. The CPU therefore queries the interrupt controller's state through the bus it was handed as a parameter, using the untimed component access path. It is not a timed read, it does not advance the clock, and it does not require the CPU to hold anything.
+
+The `IE` and `IF` registers remain readable and writable by the program through the ordinary timed path at their addresses. The two paths coexist because they are different kinds of access, which is the distinction principle P5 exists to preserve.
+
+### The owner accumulates code, and that is the cost
+Work that "belongs" to a component sometimes lives in its owner. The bus in particular becomes a substantial object: it owns the peripherals, routes accesses, applies access rules, and mediates cross-component work. This is accepted.
+
+The tripwire that distinguishes an acceptable owner from a broken design: **the owner may contain routing, sequencing, and mediation. It may not contain peripheral behaviour.** If logic describing what a peripheral *does* migrates into the owner, the ownership assignment is wrong and the fix is to move the state, not to relax rule 7.
+
+### Independent machine instances are free
+No global state and no singletons means a process can hold many machines at once. The test harness can construct one machine per test case and run the suite in parallel without contention, which matters for a per-opcode suite of the size the CPU milestone depends on.
+
+### Value ownership makes an in-process snapshot trivial, which is not the save-state format
+Because components are owned by value, copying the root object copies the machine. This is useful for rewind and for test harnesses that need a checkpoint. It is not the save-state format: the on-disk format remains explicit, field-by-field, and versioned, and never a raw object representation.
+
+### No virtual dispatch in the ownership tree
+Components are concrete members of their owner. Calls through the tree are direct and inlinable, which matters because the advance mechanism named in ADR 0002 is the hottest path in the emulator.
+
+## Status
+
+### Classification
+**Component ownership and communication model:** BLOCKING ARCHITECTURAL DECISION: accepted.
+
+### What would reopen this
+
+Not taste, and not local awkwardness. This model is reopened by the discovery of a hardware behaviour requiring two sibling components to observe each other *within* a single advance, in a manner their common owner cannot mediate, a genuine mutual dependency rather than a one-directional one.
+
+Before any such finding amends this ADR, two cheaper remedies are tried in order: reassign the ownership so the interacting state has a single owner, then mediate at the nearest common owner.
+
+### Review triggers
+- The milestone that implements OAM DMA, which exercises owner-mediated byte movement for the first time.
+- The milestone that implements the APU, which is the first genuine sibling coupling in the machine.
+
+At each, this ADR is either confirmed or amended with the specific behaviour that defeated it.
