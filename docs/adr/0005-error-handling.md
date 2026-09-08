@@ -57,3 +57,36 @@ breach the performance floor. Where an invariant is too expensive to assert on t
 **9. Failure is never signalled by a sentinel value.** No returned `$FF` meaning "no," no negative length, no null-as-error. Every one of those collides with a legitimate hardware value somewhere in this machine.
 
 **10. Ignoring a returned `Result` is a compile error** wherever the language permits it to be made one.
+
+## Alternatives considered
+
+### Alternative 1: Exceptions
+Exceptions make failure propagation concise and avoid requiring a result wrapper at every call site. They also have no normal-path performance cost when no exception is thrown.
+
+The mechanical failure is that failure is not visible in a function's return type. A reader at the call site cannot tell from the signature whether the callee may produce a recoverable condition, which undermines the explicit condition/defect distinction required by rule 1. More importantly, an exception escaping from the middle of a sequence of operations can unwind through code after the machine has already been partially mutated, making the resulting state dependent on where the exception was caught rather than on an explicitly modelled failure boundary. The mechanism therefore does not provide the value-oriented failure contract this ADR requires.
+
+### Alternative 2: Vendored `tl::expected`
+A vendored `tl::expected` provides the desired value-or-error semantics immediately and is mature, familiar, and close to the eventual standard-library type.
+
+The mechanical failure is the project's dependency boundary. The purity check currently requires the core to link against nothing but the standard library. Accommodating `tl::expected` would therefore require the purity check to maintain an allowlist or explicit exception for this header-only dependency. Once that exception exists, the same mechanism can be requested for every future header-only dependency, turning a binary architectural constraint into a growing policy list. The purity check would no longer enforce "standard library only"; it would enforce "standard library plus whatever dependencies have been approved."
+
+This is the exact failure the contradiction in the Context exists to resolve.
+
+### Alternative 3: Moving to C++23 for `std::expected`
+C++23 provides `std::expected`, which is the natural standard-library solution and removes the need to maintain an in-house equivalent. It is therefore not rejected on technical merit.
+
+The mechanical issue is scope: adopting it now changes the project's minimum language and standard-library requirements, which affects compiler versions and the CI matrix. That decision belongs to the toolchain ADR rather than this error-handling ADR.
+
+The current `Result<T, E>` deliberately makes that future decision cheap. Because rule 3 restricts `Result` to a strict subset of the standard interface, moving to C++23 later can reduce to replacing the implementation with an alias to `std::expected` and deleting the in-house type. No bespoke API has to be migrated.
+
+### Alternative 4: Error codes with out-parameters
+A function returns a status code while writing its result through a pointer or reference. This is simple, requires no custom result type, and has a long history in systems programming.
+
+The mechanical failure is that the status and the output are separate pieces of state. A caller can ignore the error code and read the output anyway, producing a read of a value that the callee never wrote. The compiler does not make the relationship between the status and the output mandatory. `Result<T, E>` instead makes the value's presence part of the returned object, so the caller cannot obtain a successful value without going through the result's success state.
+
+### Steel-man: what I would use for a two-week project
+For a two-week emulator or prototype, I would probably use exceptions or an existing `expected` implementation. The priority would be reaching a working machine quickly, and the cost of establishing a carefully bounded error contract would likely exceed the project's lifetime.
+
+That does not apply here because this project is deliberately establishing an architecture intended to survive incremental accuracy work. The dependency boundary, explicit failure classification, and migration path to a future `std::expected` are therefore part of the design rather than incidental implementation details.
+
+The alternatives either hide recoverable failure at the call site, weaken the dependency boundary, defer a toolchain decision that this ADR does not own, or separate the validity of a result from the result itself. The chosen `Result<T, E>` keeps the failure contract explicit, standard-library-only, and mechanically difficult to misuse while preserving a cheap path to `std::expected` when the toolchain permits it.
