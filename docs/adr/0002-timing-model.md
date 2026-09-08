@@ -62,13 +62,13 @@ Time advances in M-cycle quanta, triggered by the CPU's bus operations. Concrete
 
 **5. Internal CPU cycles are explicit and unbatched.** Any cycle an instruction consumes without a bus access consumes `tick()` at the point in the instruction where the hardware consumes it. Internal cycles are never collected at the start or end of an instruction, and never folded into an adjacent access.
 
-**6. The CPU is the sole caller of the timed entry points.** Nothing else in the core calls them. A component that appears to need bus access — notably the OAM DMA engine, which is driven by the clock rather than being a consumer of it — uses the untimed component access path. If a second caller advanced time, a single M-cycle would advance global time more than once.
+**6. The CPU is the sole caller of the timed entry points.** Nothing else in the core calls them. A component that appears to need bus access (notably the OAM DMA engine, which is driven by the clock rather than being a consumer of it) uses the untimed component access path. If a second caller advanced time, a single M-cycle would advance global time more than once.
 
 **7. Interrupt dispatch is composed of the same primitives.** Its stack writes are timed writes through the CPU path; its idle cycles are `tick()`. Dispatch has no special timing implementation of its own.
 
 **8. Instruction duration is emergent.** How long an instruction takes is the sum of the advances it triggers. No duration table is consulted at runtime, and no opcode implementation reports a cycle count.
 
-**9. Components receive time in M-cycle quanta and subdivide internally.** A component whose hardware resolution is finer than an M-cycle — the PPU, which works in dots — receives four dots at once and advances itself through them internally. This defines the accuracy ceiling of the model: no component can be observed at a T-cycle boundary interior to an M-cycle.
+**9. Components receive time in M-cycle quanta and subdivide internally.** A component whose hardware resolution is finer than an M-cycle (the PPU, which works in dots) receives four dots at once and advances itself through them internally. This defines the accuracy ceiling of the model: no component can be observed at a T-cycle boundary interior to an M-cycle.
 
 ### Deliberately deferred
 
@@ -88,3 +88,18 @@ It is also rejected structurally by the SM83 per-opcode tests, which specify the
 
 This decision would be reversed only if the project changed its goals and explicitly chose to trade M-cycle accuracy for performance because the chosen timing model could not meet the performance floor recorded in ADR 0007. No such trade is currently sanctioned.
 
+### Alternative 2: Tick-after-access
+
+Tick-after-access performs the bus access first and then advances the M-cycle. Under this ordering, the k-th access of an instruction occurs at `t0 + (k−1)` M-cycles rather than `t0 + k`.
+
+This ordering is plausible because the CPU's bus operation can be viewed as occupying the current M-cycle, with peripheral advancement occurring after that access. In particular, the opcode fetch for the next instruction during the final cycle of the current instruction makes the boundary between the access and the following cycle naturally align with access-then-tick.
+
+The two orderings differ by a uniform phase shift of the entire CPU access stream relative to the tick stream. They have the same instruction duration, the same sequence of accesses, and the same intervals between CPU accesses. Therefore, observations whose timing anchors are all CPU accesses are invariant under the shift. Only an anchor established outside the CPU access stream can observe the absolute phase convention.
+
+Blargg's `instr_timing`, `mem_timing`, and `mem_timing-2` tests are consequently blind to the tick/access ordering. They can distinguish instruction-stepped timing from M-cycle-interleaved timing, but their timing observations are anchored by CPU accesses, so the uniform phase shift cancels. The SM83 per-opcode transaction tests are similarly blind to the intra-M-cycle ordering: they specify which bus transaction belongs to each M-cycle, but do not establish whether the tick occurs immediately before or immediately after the transaction within that M-cycle. These suites therefore adjudicate Alternative 1, not the tick/access ordering itself.
+
+The ordering is adjudicated by a power-on-anchored observation. Execute the real boot ROM from reset and compare the machine state at boot-ROM handoff, in particular `DIV` and the PPU's position, against documented post-boot values and the skip-boot state. A one-M-cycle phase error relative to the power-on initialization provides an absolute reference that can distinguish the two conventions. Mooneye boot-state tests may provide a second instance of this class of oracle once the suite is fetched. This makes boot-ROM validation and this ordering decision the same test: skipping boot-ROM validation leaves the phase convention permanently unadjudicated.
+
+Tick-then-access is adopted as the provisional convention not because it is inherently more accurate, but because it is internally consistent with the other timing rules: an access consumes the M-cycle it occupies, instruction duration corresponds directly to its access and internal-cycle count, and a read observes peripheral state after the tick associated with the transaction. The convention is therefore chosen for consistency with rules 3, 5, and 8, pending the power-on-anchored evidence.
+
+Reversing the ordering would require changing the single access/tick ordering defined by rule 2, but the practical risk is broader because an incorrect phase could have been silently compensated elsewhere, such as by tuning an initial `DIV` or other peripheral state in the skip-boot state. Any such compensating offset must be documented in `docs/known-shortcuts.md` rather than silently introduced. The direct reversal is therefore localized to the rule-2 mechanism, but all phase-dependent initialization and timing tests must be revalidated.
