@@ -103,3 +103,54 @@ The ordering is adjudicated by a power-on-anchored observation. Execute the real
 Tick-then-access is adopted as the provisional convention not because it is inherently more accurate, but because it is internally consistent with the other timing rules: an access consumes the M-cycle it occupies, instruction duration corresponds directly to its access and internal-cycle count, and a read observes peripheral state after the tick associated with the transaction. The convention is therefore chosen for consistency with rules 3, 5, and 8, pending the power-on-anchored evidence.
 
 Reversing the ordering would require changing the ordering defined by rule 3, while rule 2 ensures that the change is localized to the single mechanism responsible for advancing time. The practical risk is broader because an incorrect phase could have been silently compensated elsewhere, such as by tuning an initial `DIV` or other peripheral state in the skip-boot state. Any such compensating offset must be documented in `docs/known-shortcuts.md` rather than silently introduced. The direct reversal is therefore localized to the rule-2 mechanism, but all phase-dependent initialization and timing tests must be revalidated.
+
+## Consequences
+
+### The CPU remains an ordinary interpreter
+It is commonly claimed that M-cycle-accurate timing requires restructuring the CPU as a suspendable state machine. That claim assumes the host loop drives the CPU one M-cycle at a time, which forces the CPU to be resumable between cycles. This ADR inverts that control flow: time advances underneath the CPU because the bus operation advances it, so the CPU is written as a straightforward recursive interpreter and never suspends. The restructuring cost usually attributed to this model does not apply here.
+
+### Emulation is not preemptible below the instruction boundary
+Because the CPU never suspends, the host cannot stop it partway through an instruction. Save states, breakpoints, and any future rewind facility are instruction-boundary granular. A debugger cannot offer "break at M-cycle 3 of this `CALL`" without the state machine this ADR avoids. This is accepted: instruction-boundary snapshots are complete and deterministic, which is what `docs/scope.md` section 8 and the save-state requirements need.
+
+### The timed path has exactly one caller, permanently
+Rule 6 is not a stylistic preference; it is the invariant that keeps one M-cycle of emulated time equal to one advance. Every future bus master (OAM DMA first, anything else later) uses the untimed component path, and the component's owner performs the byte movement on its behalf, since no component may reference another. This is a constraint on the design of every peripheral added from here on.
+
+### The accuracy ceiling is one M-cycle
+Components receive time in M-cycle quanta and subdivide internally. A dot-accurate renderer remains possible, because the PPU subdivides its four dots itself. What is not representable is an interaction where the CPU and a peripheral must be interleaved *within* an M-cycle. Behaviour that depends on such interleaving cannot be reproduced without moving to T-cycle stepping, which is out of scope for this ADR and would be a separate decision with its own evidence.
+
+### Every bus access pays for advancing every timed component
+This is the principal cost of the model and the reason a performance floor exists at all. The advance mechanism is on the hottest path in the emulator: no allocation, no I/O, and no virtual dispatch may appear in it. ADR 0007 records the floor and its measurement.
+
+### Absolute phase is unverified until boot-ROM validation
+Per Alternative 2, the tick/access ordering is a phase convention that no interval-anchored test can settle. Until a real boot ROM is executed from reset and the handoff state compared against documented values, the convention is adopted but unverified. Any offset introduced anywhere outside the single advance mechanism to make a timing test pass is a compensation for a possible phase error, not a fix, and is recorded in `docs/known-shortcuts.md` as such.
+
+### The CPU's primary oracle constrains the test harness
+The SM83 per-opcode suite supplies arbitrary memory contents across the whole address space and expects reads and writes to behave uniformly. Exercising it therefore requires a bus configured with test-oriented components (flat memory in place of a mapper, and no rendering-mode locking) rather than an abstraction introduced for mocking. This is consistent with the project's decision to test the CPU against a concrete bus.
+
+### Duration tests double as structure tests
+Because instruction duration is emergent (rule 8), a wrong duration is evidence of a wrong access sequence rather than a wrong table entry. A failure in an instruction timing suite localises to the structure of the instruction, which is a more useful diagnostic than a mismatched constant.
+
+### Deferred by this ADR
+- The order in which timed components are advanced within one tick.
+- The position of the OAM DMA engine in that order, and the mechanism by which its byte moves are performed.
+- The exact point at which pending interrupts are sampled relative to the instruction boundary. This model determines that such a point exists and is expressible in M-cycles; it does not determine which cycle it is. Decided when the interrupt controller is implemented.
+
+## Status
+
+### Classification
+- **Timing model (tick-on-bus-access):** BLOCKING ARCHITECTURAL DECISION: accepted.
+- **Access ordering (tick-then-access):** PROVISIONAL: adopted as a phase convention, pending the evidence named below.
+
+### Amendment to the originally specified adjudication mechanism
+The project's original decision brief nominated Blargg `mem_timing`, `mem_timing-2`, and the SM83 per-opcode transaction tests as the adjudicators of the *ordering*. Analysis recorded under Alternative 2 establishes that those suites adjudicate the timing model (tick-on-bus-access versus instruction-stepped) but are blind to the tick/access ordering itself, because their timing anchors are CPU accesses and the two orderings differ by a uniform shift of the entire access stream.
+
+The adjudicator for the ordering is therefore amended to the power-on-anchored observation described under Alternative 2. This is an amendment to the evidence, not to the decision.
+
+### What would settle the ordering
+Execution of a real boot ROM from reset, with the machine state at handoff (`DIV` and the PPU's position in particular) compared against documented post-boot values and against the skip-boot state table. Boot-ROM validation and this decision are the same test.
+
+### What would reopen the model
+Nothing about accuracy: instruction-stepped timing is a strict accuracy subset of this model. Only a change in project goals (an explicit decision to trade M-cycle accuracy for performance because the floor in ADR 0007 could not be met) would reopen it. No such trade is sanctioned.
+
+### Review trigger
+This ADR is revisited when boot-ROM execution is implemented and validated, at which point the ordering is either confirmed or corrected and its status changes from PROVISIONAL to accepted or superseded.
