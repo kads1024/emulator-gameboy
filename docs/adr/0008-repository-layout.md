@@ -56,3 +56,25 @@ The reason is constraint 5: the test target legitimately needs the visibility a 
 **7. Documentation lives in `docs/`, with decision records in `docs/adr/`.** Already true; recorded so it stays true.
 
 **8. Everything else about layout is implementation detail.** How files are named, how deeply they nest, and how a target's sources are grouped internally are decided while implementing. They are not a review topic and they do not require an ADR to change.
+
+## Alternatives considered
+
+### Alternative 1: A single target
+
+A single target would simplify the initial project setup, but it would destroy the architectural boundary that ADR 0001 B12 is intended to enforce. The first check (that the core resolves to no link dependencies) would no longer have a distinct target to inspect, so the core could silently acquire third-party or platform dependencies while still producing a successful build.
+
+That loss propagates downstream. The dependency direction between core and the rest of the system would no longer be mechanically enforceable; the frontend could become a dependency of code that should remain platform-independent; and the test framework could become transitively available to the core. The purity checks described in ADR 0001 Alternative 2 therefore stop being meaningful because there is no longer a separately identifiable core boundary to check.
+
+### Alternative 2: A public/private include split
+
+A conventional `include/<project>/` and `src/` split would make the intended external API visually obvious and protect consumers from depending on implementation details. It was rejected because this repository has no external consumer boundary: tools and frontend are in-repository consumers, while tests intentionally require visibility of concrete core types under ADR 0003 rule 9.
+
+The decision would flip if the core becomes a separately consumed library with external consumers whose dependency on internal headers needs to be prevented.
+
+### Alternative 3: Separate repositories
+
+Separate repositories would weaken the atomicity of changes that cross the core, tools, frontend, and tests. A bus-contract change and its corresponding tests could no longer be reviewed as one repository diff or validated by one CI invocation against one commit. When a regression appears months later, `git bisect` would also lose its ability to identify the offending cross-component change as a single repository history event; the investigation would require correlating histories across repositories.
+
+This is a mechanical cost, not merely a workflow preference.
+
+The chosen four-target layout therefore costs more initial structure than a solo project strictly needs: four targets must be configured before the emulator exists, and genuinely shared code that belongs to neither a target nor the core has no automatic home. That cost is accepted because the targets make the architectural dependency boundaries explicit and mechanically enforceable. Internal file organization remains implementation detail and can be changed without revisiting this ADR.
