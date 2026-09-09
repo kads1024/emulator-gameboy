@@ -224,6 +224,16 @@ Its check set is tuned against real code, so at the outset it contributes less t
 - **Language standard, compilers, build system, and configurations:** BLOCKING ARCHITECTURAL DECISION: accepted.
 - **Inclusion of the MSVC front end in the compiler matrix:** PROVISIONAL.
 
+### CI provider and runner images
+
+Recorded when CI was stood up. This ADR put "the CI provider's workflow mechanics" out of scope but never named the provider, which left a decision unrecorded rather than deferred.
+
+- **Provider: GitHub Actions.** `origin` is a GitHub repository, which makes the choice close to forced; it is written down because near-forced is not the same as recorded, and because the alternative would otherwise look unconsidered.
+- **Images: `ubuntu-24.04`** for the GCC legs and **`windows-2022`** for the clang legs. This is A2 and A3 exactly: both enforcing compilers, no `cl.exe` leg.
+- The repository is public, so the matrix runs on every push to `main` and on every pull request without metering concerns. Superseded runs are cancelled so a stale red does not outlive the change that caused it.
+
+**A4's review trigger fired here and the pin survives.** The interim CMake floor of 3.25 was chosen before any image was known. Both images supply a newer CMake than that, so the floor stands unchanged. It is revisited again only if an image's CMake drops below the pin, which would appear as a configure failure naming the version rather than as a silent skip.
+
 ### Adjudication of the MSVC question
 
 The MSVC front end is added to the matrix if a defect reaches CI or a released branch that the MSVC front end would have detected and that both enforcing compilers accepted. Absent such a defect, front-end diversity is not purchased at the cost of a compiler that cannot enforce this project's conversion rule.

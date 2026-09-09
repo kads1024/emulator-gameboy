@@ -7,6 +7,15 @@
 namespace gb {
 
 // Deliberately trivial: nothing here models the machine.
-int core_placeholder() { return 0; }
+//
+// The check below is right that nothing declares or uses this function: its only purpose
+// is to give the core target a symbol before any real code exists. Giving it internal
+// linkage would make it an unused static function and trip -Wunused-function, so the two
+// guards would contradict each other over a function that is deleted the moment the first
+// real core source lands.
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+int core_placeholder() {
+    return 0;
+}
 
-}  // namespace gb
+} // namespace gb
