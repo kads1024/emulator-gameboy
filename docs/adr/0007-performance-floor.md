@@ -33,13 +33,13 @@ Optimisation policy, the choice of profiling tools, per-subsystem performance bu
 **3. The workload is fixed, named, and version-controlled.** It is defined by: one specific ROM, a fixed initial machine state, a fixed frame count, and no input. The ROM must be deterministic, require no input, exercise the CPU, PPU, and timer together, and be freely redistributable or fetchable by checksum, a commercial ROM is excluded by `docs/scope.md`. The specific ROM is selected when the test ROM acquisition mechanism is settled.
 **4. Two figures are reported, and they have different jobs.**
 - **Absolute throughput** - the human-meaningful number that the 300% floor is stated against. It is compared against the floor with a wide margin, and it answers "is this emulator fast enough to be worth using."
-- **Calibrated ratio** - the same measurement divided by the time taken, in the same job on the same host, by a fixed calibration workload committed to the repository. It answers "did this change make the emulator slower," with most host-to-host variation divided out.
+- **Calibrated ratio** - the wall time the emulator takes to run the workload, divided by the wall time a fixed calibration workload takes in the same job on the same host. Both terms are times, so the ratio is dimensionless and a host that is uniformly slower cancels out of it. It answers "did this change make the emulator slower," which the absolute figure cannot answer on a shared runner. The calibration workload is committed to the repository.
 **5. The regression gate is the calibrated ratio, compared against a baseline committed to the repository.** The absolute figure is the floor tripwire and is expected to sit far above 300%.
 **6. Each measurement is repeated and aggregated by median**, with the run count and tolerance band set from the data named in the Status section, not chosen by intuition.
 **7. The baseline is a reviewed file.** Changing it is a commit with a stated reason. Editing the baseline to turn a red build green, without that reason, is the specific failure this rule exists to prevent.
 **8. When the gate fires, the response is to find the change that caused it.** Raising the baseline is the response only after the cause is identified and the cost accepted deliberately.
 **9. The reference is a runner class plus a calibration workload, never a physical machine.** A tripwire that only one computer in the world can reproduce is not a tripwire.
-**10. The measurement runs in CI on every change that touches the core**, so that the change which moved the number is the change being reviewed.## Alternatives considered
+**10. The measurement runs in CI on every change that touches the core**, so that the change which moved the number is the change being reviewed.
 
 ## Alternatives considered
 
@@ -129,7 +129,9 @@ From the data, determine:
 3. The run count N at which the within-job median becomes stable enough to be useful.
 4. The tolerance band, derived from the observed spread with a stated safety factor, rather than chosen by intuition.
 
-**The experiment fails informatively.** If the spread across jobs remains large after calibration, the conclusion is that this runner class cannot support a trustworthy gate, and the method is revisited, with the dedicated machine reconsidered against rule 9, and host-instruction counting reconsidered as a *supplementary* workload-equivalence check rather than as a replacement for measuring time.
+**The experiment fails informatively.** If the spread across jobs remains large after calibration, the conclusion is that this runner class cannot support a trustworthy gate, and the method is revisited, with the dedicated machine reconsidered against rule 9, and host-instruction counting reconsidered as a *supplementary* regression signal rather than as a replacement for measuring time.
+
+Emulated-cycle counting is recorded alongside whichever method is used, as the workload-equivalence check Alternative 3 describes: it confirms the benchmark ran the same program, and it is not a performance measure. The two counts are not interchangeable and the distinction is the substance of Alternative 3.
 
 ### What would reopen the method
 Evidence that the smallest regression this gate can reliably detect is large enough to be useless, that is, that the tolerance band demanded by observed variance exceeds the size of a regression worth catching.

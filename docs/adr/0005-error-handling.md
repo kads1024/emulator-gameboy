@@ -35,7 +35,7 @@ The diagnostic and logging design, the debugger's error presentation, and the fr
 
 ## Decision
 
-**1. Failures are classified before they are handled.** A failure is either a *condition*(a possible state of the world outside the program's control ) or a *defect*(a violated invariant). Every failure site is one or the other, and the two use different mechanisms. A failure that is hard to classify is a signal that the invariant is unclear, not a reason to use both.
+**1. Failures are classified before they are handled.** A failure is either a *condition* (a possible state of the world outside the program's control) or a *defect* (a violated invariant). Every failure site is one or the other, and the two use different mechanisms. A failure that is hard to classify is a signal that the invariant is unclear, not a reason to use both.
 
 **2. Conditions are returned as values, using an in-house `Result<T, E>` defined in the core.** It depends on nothing but the standard library, which satisfies the purity requirement without an exception to it.
 
@@ -45,7 +45,7 @@ The purpose of the restriction is migration: when the project moves to a standar
 
 **4. Errors are enumerated values, not text.** The core produces error values with structured payload where the caller needs detail. It does not produce sentences. Message text belongs to the tools and the frontend, which own presentation and are permitted to do I/O.
 
-**5. No exceptions in the core.** Not for control flow and not for load failures. Allocation failure is the single exception to the rule and is deliberately unhandled: the core does not attempt to recover from it, and treats it as a condition outside its model.
+**5. No exceptions in the core.** Not for control flow and not for load failures. Allocation failure is the single exception to the rule and is deliberately unhandled: the core does not attempt to recover from it, and treats it as lying outside its failure model. It is not a *condition* in rule 1's sense, since no caller is expected to model it.
 
 **6. Defects are assertions.** A violated invariant aborts in debug builds with a diagnostic identifying the invariant. Release builds do not pay for checks that would
 breach the performance floor. Where an invariant is too expensive to assert on the hot path, the design is expected to make its violation impossible by construction rather than to check for it, total decoding rather than a decode failure path is the model.
@@ -91,7 +91,7 @@ Return `Result` from everything, including the failures this ADR classifies as d
 
 The first mechanical failure is where this lands relative to rule 8. Bus accesses and instruction execution run on every emulated cycle. Giving them a `Result` return puts a discriminated union on the return path of the hottest functions in the machine and obliges every caller on that path either to branch on it or to propagate it, which moves the same obligation one frame up. The cost is not only the branch. It is a branch installed at sites where the failure it tests for cannot occur unless the emulator is already broken, per-cycle overhead bought entirely for cases that a correct build never reaches. Rule 8 keeps that path clear of error machinery because the machinery there is not paying for anything.
 
-The second is what "handling" a defect would actually mean. Consider a caller that receives *the decoder found no region for this address*. Decoding is total by ADR 0004 rule 2, so every bit pattern maps to some instruction and this condition cannot have been produced by the emulated program's data. It can only have been produced by a defect in the decoder or in the table it consults. The caller cannot retry, because the same input yields the same result. It cannot substitute a default, because any substitution invents behaviour the hardware does not have. It cannot surface the failure to the guest, because the emulated machine has no corresponding failure to observe. Whatever it does next produces behaviour that is neither the hardware's nor the program's. Returning the condition relocates the defect; it does not handle it. An abort at the detection site at least stops while the state is still diagnostic.
+The second is what "handling" a defect would actually mean. Consider a caller that receives *the decoder found no region for this address*. Decoding is total by ADR 0004 (bus contract) rule 2, so every address in the space belongs to exactly one region, and this condition cannot have been produced by the emulated program's data. It can only have been produced by a defect in the decoder or in the table it consults. The caller cannot retry, because the same input yields the same result. It cannot substitute a default, because any substitution invents behaviour the hardware does not have. It cannot surface the failure to the guest, because the emulated machine has no corresponding failure to observe. Whatever it does next produces behaviour that is neither the hardware's nor the program's. Returning the condition relocates the defect; it does not handle it. An abort at the detection site at least stops while the state is still diagnostic.
 
 The third is what this does to rule 1's visibility. The classification earns its place by being readable at the call site: a `Result` return states that the callee has a failure mode the caller is expected to model, and the absence of one states that any failure here is a bug in this program. Carrying both categories on the same channel makes every signature say the same thing, and "this may fail in a way you must handle" becomes indistinguishable from "this may fail in a way no caller can handle." The distinction survives only in the author's head, which is the one place this ADR cannot enforce it. Rule 1 degrades from a mechanism into a convention.
 
@@ -124,8 +124,10 @@ A hand-written vocabulary type carries its own unit tests, construction in both 
 ### The error enumeration and its presentation live in different targets
 Rule 4 puts message text outside the core, so an error value and the sentence describing it are maintained in separate places and can drift. The intended countermeasure is an exhaustive mapping over the enumeration, which turns an omission into a compile error rather than an empty message. Until that exists, drift is possible and is a known cost of rule 4.
 
-### Deferred by this ADR
-The diagnostic mechanism P14 relies on (how a debug build reports a modelling gap, and how a release build counts one without flooding output or breaching the performance floor) is not decided here. It is a logging and diagnostics decision that depends on the toolchain.
+### Deferred by this ADR, and since partly settled
+The diagnostic mechanism P14 relies on was deferred here as a logging decision dependent on the toolchain. ADR 0001 (toolchain) has since settled its shape: the core cannot print, because B13 forbids it the headers, so a modelling gap is recorded as observable state the core's owner reads and the tools and frontend do the reporting.
+
+What remains open is the detail of that record: how a debug build surfaces it, and how a release build bounds it without flooding a consumer or breaching the performance floor. That is decided when the first gap needs recording.
 
 ## Status
 

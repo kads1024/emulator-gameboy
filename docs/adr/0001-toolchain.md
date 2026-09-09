@@ -19,7 +19,8 @@ The following are observations from the development machine, not assumptions:
 - `cl.exe` is present on disk but not on `PATH`.
 - ASan builds on Windows and requires the LLVM runtime directory on `PATH` at run time.
 - UBSan with its runtime library fails to link on Windows against this SDK. UBSan in trap mode builds, runs, and was verified to catch signed overflow, with a trap and no diagnostic text.
-- WSL provides a Linux environment with GCC and CMake.
+- WSL provides a Linux environment with GCC and CMake, and with neither clang nor Ninja.
+- GCC's sanitizer runtimes are present and working in that environment. A signed-overflow probe linked under both `-fsanitize=address` and `-fsanitize=undefined`, and the UBSan build reported the overflow with a source location and continued. This is the full diagnostic behaviour B10 depends on, and it is measured rather than assumed.
 - Ninja is not installed on either environment.
 - The twelve-pattern conversion survey established that neither clang nor GCC is uniformly stricter: which compiler warns depends on the expression, so code must satisfy both.
 
@@ -45,7 +46,9 @@ The repository layout, the CI provider's workflow mechanics, the test ROM acquis
 
 **A6. Two local development targets are supported:** Windows with clang as the primary, and WSL with GCC as the second, so that both enforcing compilers can be exercised before pushing rather than discovered in CI.
 
-**A7. Configurations are debug and release.** Debug is unoptimised and carries sanitizers. Release is optimised, is what the performance gate measures, and is what ships. Sanitizer variants are separate presets rather than modes of the debug preset.
+**A7. Configurations are debug and release.** Debug is unoptimised and carries the sanitizers available in its environment, which B10 and B11 specify per platform. Release is optimised, is what the performance gate measures, and is what ships.
+
+Where a sanitizer cannot be combined with the debug preset's default set, it gets a preset of its own rather than silently replacing one of them. A preset that appears to carry a sanitizer it did not enable is the failure A8 forbids.
 
 **A8. A configuration that cannot support a required flag fails to configure.** Silent degradation (a preset that quietly drops a sanitizer or a warning because the toolchain did not accept it) is forbidden, because a check that can silently disable itself is not a check.
 
@@ -61,7 +64,7 @@ The repository layout, the CI provider's workflow mechanics, the test ROM acquis
 
 ### Integer conversion convention
 
-**B4. Interfaces return hardware-domain types.** Register accessors, memory accessors, and instruction decoders return `u8` or `u16`, never `int`. This keeps the common case warning-free by construction: both compilers exempt arithmetic in which every operand already has the destination type, so `u8 + u8` assigned to `u8` produces no diagnostic and needs no helper and no cast.
+**B4. Interfaces return hardware-domain types.** Register accessors, memory accessors, and instruction decoders return `u8` or `u16`, never `int`. This keeps the common case warning-free by construction: both compilers exempt *binary* arithmetic in which both operands already have the destination type, so `u8 + u8` assigned to `u8` produces no diagnostic and needs no helper and no cast. The exemption reaches no further than that, as B5 records.
 
 **B5. That exemption is binary only.** Measured behaviour: GCC warns on `u8 c = a + b + carry;` even when all three operands are `u8`, although modular arithmetic makes the truncation exact. Three-operand arithmetic (ADC, SBC, and multi-term address computation) therefore requires a named operation regardless of interface types. B4 shrinks the helper set; it does not eliminate it.
 

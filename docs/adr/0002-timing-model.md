@@ -63,7 +63,7 @@ Time advances in M-cycle quanta, triggered by the CPU's bus operations. Concrete
 
 **5. Internal CPU cycles are explicit and unbatched.** Any cycle an instruction consumes without a bus access consumes `tick()` at the point in the instruction where the hardware consumes it. Internal cycles are never collected at the start or end of an instruction, and never folded into an adjacent access.
 
-**6. The CPU is the sole caller of the timed entry points.** Nothing else in the core calls them. A component that appears to need bus access (notably the OAM DMA engine, which is driven by the clock rather than being a consumer of it) uses the untimed component access path. If a second caller advanced time, a single M-cycle would advance global time more than once.
+**6. The CPU is the sole caller of the timed entry points.** Nothing else in the core calls them. A component that appears to need bus access (notably the OAM DMA engine, which is driven by the clock rather than being a consumer of it) is served by the untimed component access path, which its owner uses on its behalf rather than the component calling anything itself. If a second caller advanced time, a single M-cycle would advance global time more than once.
 
 **7. Interrupt dispatch is composed of the same primitives.** Its stack writes are timed writes through the CPU path; its idle cycles are `tick()`. Dispatch has no special timing implementation of its own.
 

@@ -1,6 +1,6 @@
 # ADR 0006: Cartridge representation
 
-## Status summary 
+## Status summary
 - **Cartridge structure and the cached-offset read path:** BLOCKING ARCHITECTURAL DECISION: accepted.
 - **Closed variant as the mapper representation:** PROVISIONAL: adjudication mechanism recorded in the Status section.
 
@@ -83,13 +83,13 @@ In effect, compile-time polymorphism would move the complexity rather than remov
 
 ### Alternative 4: Bank copy into a window buffer
 
-On a bank switch, the selected 16 KB ROM bank could be copied into a fixed buffer representing the CPU-visible `0x4000–0x7FFF` window. Reads would then simply index that buffer.
+On a bank switch, the selected 16 KB ROM bank could be copied into a fixed buffer representing the CPU-visible `$4000`–`$7FFF` window. Reads would then simply index that buffer.
 
 This makes ordinary reads simple, but the fixed-window assumption does not hold for the hardware.
 
-First, a far call changes the selected ROM bank and execution immediately continues from the newly mapped `0x4000–0x7FFF` region. Large games can perform such bank switches frequently, so every switch would require copying an entire 16 KB bank merely to establish the CPU-visible mapping. The cost is proportional to the window size rather than to the small state change that selected it.
+First, a far call changes the selected ROM bank and execution immediately continues from the newly mapped `$4000`–`$7FFF` region. Large games can perform such bank switches frequently, so every switch would require copying an entire 16 KB bank merely to establish the CPU-visible mapping. The cost is proportional to the window size rather than to the small state change that selected it.
 
-Second, MBC1's mode register changes the meaning of the **fixed** `0x0000–0x3FFF` region. In one mode, the upper bank-selection bits participate in selecting the bank visible there. A single copied "switchable window" therefore cannot represent the complete mapping semantics: the supposedly fixed window can itself change.
+Second, MBC1's mode register changes the meaning of the **fixed** `$0000`–`$3FFF` region. In one mode, the upper bank-selection bits participate in selecting the bank visible there. A single copied "switchable window" therefore cannot represent the complete mapping semantics: the supposedly fixed window can itself change.
 
 **Rejected:** bank copying turns address mapping into bulk data movement and cannot cleanly represent MBC1's mode-dependent fixed window.
 

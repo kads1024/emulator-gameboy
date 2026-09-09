@@ -42,7 +42,7 @@ The behaviour of individual I/O registers, which belongs to each peripheral. Car
 | `$8000`–`$9FFF` | VRAM | PPU |
 | `$A000`–`$BFFF` | External RAM | cartridge |
 | `$C000`–`$DFFF` | WRAM | WRAM |
-| `$E000`–`$FDFF` | Echo RAM | WRAM, mirroring `C000–DDFF` |
+| `$E000`–`$FDFF` | Echo RAM | WRAM, mirroring `$C000`–`$DDFF` |
 | `$FE00`–`$FE9F` | OAM | PPU |
 | `$FEA0`–`$FEFF` | Prohibited | no responder |
 | `$FF00`–`$FF7F` | I/O registers | the addressed peripheral |
@@ -60,6 +60,8 @@ Region boundaries are named constants, never literals, per `docs/scope.md` secti
 | Enforces access permission | yes | no | no |
 | Triggers side effects | yes | as required by the operation | never |
 | Callable by | the CPU only | owners, on behalf of components | tooling only |
+
+The bus may additionally expose *named untimed queries* answering one specific question about a component it owns, such as whether an interrupt is pending. A query of that kind is owner-mediated work under ADR 0003 (ownership) rule 7: the caller names what it needs, the bus reads its own component to answer, and the generic component path stays reserved for owners. This is how the CPU learns of pending interrupts without a timed access and without owning anything, as ADR 0003 records.
 
 **6. Access permission is queried from the owner of the resource.** The bus does not reason about PPU modes; it asks the PPU. Permission logic lives with the component that owns the storage, per `docs/architecture.md` P7.
 

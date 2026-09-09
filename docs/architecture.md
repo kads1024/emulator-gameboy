@@ -38,9 +38,9 @@ Where a principle is not final, it carries a **Status** line naming what would c
 - An internal cycle absorbed into an adjacent access.
 - A path that skips the tick because "nothing observes it."
 
-**Status.** PROVISIONAL. Adjudicated by Blargg `mem_timing`, Blargg `mem_timing-2`, and the SM83 per-opcode bus transaction tests. Reopened only by concrete test evidence that this ordering cannot reproduce required behavior, never by a theoretical alternative.
+**Status.** PROVISIONAL, and only in part: the tick-on-bus-access model is settled, the tick-then-access *ordering* is not. ADR 0002 (timing model) establishes that the Blargg timing suites and the SM83 transaction tests adjudicate the model but are blind to the ordering, because their timing anchors are all CPU accesses and the two orderings differ by a uniform phase shift of the entire access stream. The ordering is adjudicated by the power-on-anchored boot-ROM handoff comparison recorded there. Reopened only by concrete test evidence, never by a theoretical alternative.
 
-**Enforcement.** CI (the named suites), review.
+**Enforcement.** CI (the model, via the Blargg and SM83 suites; the ordering, via boot-ROM handoff validation), review.
 
 ### P3. Instruction timing is emergent, never tabulated.
 
@@ -214,7 +214,9 @@ The timed path has exactly one caller: the CPU. Anything else that appears to ne
 
 **Hardware fact.** The machine has definite behavior everywhere, including the prohibited region and open bus. Where *we* do not know that behavior, the gap is ours, not the machine's.
 
-**Rule.** Unimplemented or unknown behavior produces a debug assertion or a counted, rate-limited diagnostic. It never returns a plausible value. Debug builds make it easy to detect; release builds neither flood output nor break the performance floor.
+**Rule.** Unimplemented or unknown behavior produces a debug assertion, or is recorded as observable state the core's owner can read. It never returns a plausible value.
+
+The core does not print. P11 forbids it the means, so "loud" inside the core means data that the tools and frontend report, not output the core produces. Debug builds make a gap easy to detect; release builds neither flood a consumer nor break the performance floor. ADR 0001 (toolchain) records the shape of that mechanism; the detail of the record is decided when the first gap needs recording.
 
 **Fails review.**
 - `default: return 0;`

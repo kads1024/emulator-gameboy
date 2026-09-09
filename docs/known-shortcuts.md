@@ -15,7 +15,7 @@ A behaviour that is neither — an unknown, an approximation nobody chose, a val
 4. **Retired entries are moved, not deleted.** When a deviation is removed, its entry moves to the Retired section with the date and the change that removed it. The file is a record, not a to-do list.
 5. **An entry is retired only when a test proves the deviation is gone.** "It looks right now" does not retire an entry.
 
-These rules exist so that a check can later assert, mechanically, that every I appearing in the source has an open entry here and every open entry has at least on source site.
+These rules exist so that a check can later assert, mechanically, that every ID appearing in the source has an open entry here and every open entry has at least one source site.
 
 ## Entry format
 Each entry uses these fields, in this order.
@@ -47,7 +47,7 @@ Template, illustrative only — this is not an entry:
 ## Open entries
 None. No emulation code exists yet.
 
-An empty list here is an assertion, not an oversight: as of the last commit touching thi file, the project knowingly deviates from hardware behaviour in zero places.
+An empty list here is an assertion, not an oversight: as of the last commit touching this file, the project knowingly deviates from hardware behaviour in zero places.
 
 ## Retired entries
 None.

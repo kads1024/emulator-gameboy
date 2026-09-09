@@ -94,7 +94,9 @@ Rule 7 says the owner mediates. But the first tool is not mediation, it is to as
 This is recorded as the first real test of rule 7, to be settled at the milestone that implements the APU, with ownership reassignment tried before mediation and mediation tried before amending this ADR.
 
 ### Worked example: interrupt dispatch reading pending state
-The CPU must know whether `IE & IF` is non-zero in order to decide whether to dispatch, and that decision is not itself a memory access performed by the program. The CPU therefore queries the interrupt controller's state through the bus it was handed as a parameter, using the untimed component access path. It is not a timed read, it does not advance the clock, and it does not require the CPU to hold anything.
+The CPU must know whether `IE & IF` is non-zero in order to decide whether to dispatch, and that decision is not itself a memory access performed by the program. The CPU therefore asks the bus it was handed as a parameter, through a named untimed query the bus exposes for exactly this question. The bus answers it by reading the interrupt controller it owns, which is rule 7: the owner mediates. It is not a timed read, it does not advance the clock, and it does not require the CPU to hold anything.
+
+The distinction is worth stating because `docs/architecture.md` P5 and ADR 0004 (bus contract) rule 5 both reserve the generic component access path for owners acting on behalf of components they own, and the CPU owns nothing. The CPU calls a query; the bus uses the component path internally to answer it.
 
 The `IE` and `IF` registers remain readable and writable by the program through the ordinary timed path at their addresses. The two paths coexist because they are different kinds of access, which is the distinction principle P5 exists to preserve.
 
