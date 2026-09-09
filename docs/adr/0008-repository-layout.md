@@ -15,7 +15,7 @@ This ADR decides the target boundaries, the direction of dependency between them
 
 ### What constrains the answer
 
-1. **The core links only the standard library, and the build fails otherwise.** The check in ADR 0001 (toolchain) B12 asserts that the core target resolves to no link dependencies. That assertion needs a target to make it about.
+1. **The core links only the standard library, and the build fails otherwise.** The check in ADR 0001 (toolchain) B12 asserts that the core target resolves to no declared link dependencies. That assertion needs a target to make it about.
 2. **The core performs no I/O.** It accepts bytes and input state and emits shade indices and audio samples. Reading files is the job of whatever sits above it.
 3. **The project ships more than the core.** A headless runner, a debugger, and a frontend with video, audio, input and frame pacing are all in scope, and each has dependencies the core may not acquire.
 4. **Tests link a framework the core must not.** ADR 0001 B18 requires the framework to reach the tests and never the core.
@@ -49,6 +49,8 @@ The purpose of this rule is visibility rather than tidiness: a file added to the
 
 The reason is constraint 5: the test target legitimately needs the visibility a public/private split would deny it. A split that the tests must bypass makes the "public" set a fiction, and a split that the tests honour makes the tests unable to construct the machine the way ADR 0003 rule 9 requires.
 
+The core is consumed through headers, not through C++20 modules. This is recorded because the build would otherwise decide it silently: module support has to hold across both enforcing compilers, the build system, and clang-tidy simultaneously, and a gap in any one of them is paid for in build machinery rather than in emulator accuracy. Revisited only if that support becomes uniform across the matrix, and never as part of another change.
+
 **5. Test-oriented components live in the test target, never in the core.** A component that exists so a test can drive something is test code, and its presence in the core would be the test-only architecture `docs/scope.md` and ADR 0003 rule 9 exclude.
 
 **6. Fetched artifacts never land in a source directory.** The test framework is fetched into the build tree at configure time. Test ROMs land in a location that is gitignored and outside every target's source directory.
@@ -57,11 +59,13 @@ The reason is constraint 5: the test target legitimately needs the visibility a 
 
 **8. Everything else about layout is implementation detail.** How files are named, how deeply they nest, and how a target's sources are grouped internally are decided while implementing. They are not a review topic and they do not require an ADR to change.
 
+This includes the build-system names of the targets, which may carry a project prefix to avoid colliding with the targets a fetched dependency defines. What rule 3 fixes is the directory a file lives in and the boundary it implies, not the string the build system uses to refer to it.
+
 ## Alternatives considered
 
 ### Alternative 1: A single target
 
-A single target would simplify the initial project setup, but it would destroy the architectural boundary that ADR 0001 B12 is intended to enforce. The first check (that the core resolves to no link dependencies) would no longer have a distinct target to inspect, so the core could silently acquire third-party or platform dependencies while still producing a successful build.
+A single target would simplify the initial project setup, but it would destroy the architectural boundary that ADR 0001 B12 is intended to enforce. The first check (that the core declares no link dependencies) would no longer have a distinct target to inspect, so the core could silently acquire third-party or platform dependencies while still producing a successful build.
 
 That loss propagates downstream. The dependency direction between core and the rest of the system would no longer be mechanically enforceable; the frontend could become a dependency of code that should remain platform-independent; and the test framework could become transitively available to the core. The purity checks described in ADR 0001 Alternative 2 therefore stop being meaningful, because there is no longer a separately identifiable core boundary to check.
 
@@ -92,7 +96,7 @@ A reasonable solo engineer starting this repository would pick the single target
 
 ### The purity assertion has a subject
 
-ADR 0001 (toolchain) B12's first check asserts that a target resolves to no link dependencies. This layout is what makes "a target" well defined. The check and this ADR are two halves of one mechanism, and neither is useful alone.
+ADR 0001 (toolchain) B12's first check asserts that a target declares no link dependencies. This layout is what makes "a target" well defined. The check and this ADR are two halves of one mechanism, and neither is useful alone.
 
 ### A misplaced file is visible before CI runs
 
@@ -131,4 +135,4 @@ A product-level change that introduces a second machine-level artefact, not a ne
 ### Review triggers
 
 - The build setup step, when the targets are created and the purity assertion is wired to the core target for the first time.
-- The first time code appears that plausibly belongs to two targets and to neither, which tests whether the duplication rule survives contact
+- The first time code appears that plausibly belongs to two targets and to neither, which tests whether the duplication rule survives contact.

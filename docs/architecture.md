@@ -85,7 +85,9 @@ A duration table in *test* code, asserting emergent behavior against documented 
 | Component access | no | no | as required | owners, on behalf of components |
 | Debug access | no | no | no | tooling |
 
-The timed path has exactly one caller: the CPU. Anything else that appears to need it (including DMA, which is driven by the clock rather than a consumer of it) uses the component path, or global time advances twice per M-cycle.
+The timed path has exactly one caller: the CPU. Anything else that appears to need it (including DMA, which is driven by the clock rather than a consumer of it) is served by the component path, which its owner uses on its behalf, or global time advances twice per M-cycle.
+
+"Tooling" includes the test target: a test inspecting machine state without perturbing it uses the debug path, not the CPU path. ADR 0004 (bus contract) rule 5 carries the full statement of the three paths and their canonical names.
 
 **Fails review.**
 - Any non-CPU call site of the timed path.
@@ -175,7 +177,7 @@ The timed path has exactly one caller: the CPU. Anything else that appears to ne
 
 **Fails review.**
 - `<iostream>`, `<cstdio>`, `<filesystem>`, `<chrono>`, `<random>`, or `<thread>` in a core translation unit.
-- Any link dependency of the core target.
+- Any declared link dependency of the core target.
 - A host handle stored in core state.
 
 **Enforcement.** CI (purity check).

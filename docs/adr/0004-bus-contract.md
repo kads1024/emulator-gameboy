@@ -61,6 +61,10 @@ Region boundaries are named constants, never literals, per `docs/scope.md` secti
 | Triggers side effects | yes | as required by the operation | never |
 | Callable by | the CPU only | owners, on behalf of components | tooling only |
 
+These three names (**CPU path**, **component path**, **debug path**) are the canonical ones. Where other documents say "the timed path" or "the timed entry points," they mean the CPU path; there is no fourth path and no other timed one.
+
+"Tooling," in the debug path's row, includes the test target. A test asserting the contents of memory without perturbing the machine is doing exactly what the debug path exists for, and reading through the CPU path instead would advance the clock and make the assertion measure something other than what it names.
+
 The bus may additionally expose *named untimed queries* answering one specific question about a component it owns, such as whether an interrupt is pending. A query of that kind is owner-mediated work under ADR 0003 (ownership) rule 7: the caller names what it needs, the bus reads its own component to answer, and the generic component path stays reserved for owners. This is how the CPU learns of pending interrupts without a timed access and without owning anything, as ADR 0003 records.
 
 **6. Access permission is queried from the owner of the resource.** The bus does not reason about PPU modes; it asks the PPU. Permission logic lives with the component that owns the storage, per `docs/architecture.md` P7.

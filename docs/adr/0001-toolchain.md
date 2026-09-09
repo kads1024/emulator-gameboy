@@ -42,6 +42,8 @@ The repository layout, the CI provider's workflow mechanics, the test ROM acquis
 
 **A4. The build system is CMake, driven by presets.** The minimum CMake version is pinned to the lowest version available across the CI images and the development machine, and recorded in the top-level build file rather than assumed.
 
+Until CI images are selected, that floor cannot be computed. The interim rule: pin a version the development machine satisfies and that is widely available on current Linux distributions and CI images, and revisit the pin when the CI provider is chosen. A floor that is merely the developer's installed version is a floor that will break the first CI run, so the interim pin is deliberately lower than what is installed here.
+
 **A5. The generator is Ninja, in every environment.** One build graph locally and in CI, identical across compilers. It is not currently installed and its installation is a prerequisite of the build step.
 
 **A6. Two local development targets are supported:** Windows with clang as the primary, and WSL with GCC as the second, so that both enforcing compilers can be exercised before pushing rather than discovered in CI.
@@ -100,13 +102,13 @@ A storage-indexing helper would eliminate most such conversions by centralising 
 
 **B10. Linux is the authoritative sanitizer environment.** The debug configuration there (in CI and in WSL) carries ASan and UBSan with their runtime libraries and full diagnostics.
 
-**B11. Windows sanitizer support is asymmetric, and the asymmetry is recorded rather than hidden.** ASan builds and runs, given the LLVM runtime directory on `PATH`. UBSan with its runtime library does not link against the installed SDK; UBSan in trap mode does work and was verified to catch signed overflow, but reports a trap rather than a diagnostic. A UB failure observed on Windows is therefore reproduced under Linux to be diagnosed.
+**B11. Windows sanitizer support is asymmetric, and the asymmetry is recorded rather than hidden.** ASan builds and runs, subject to two conditions established while standing up the build. Its dynamic runtime must be findable, which the build satisfies by staging the runtime beside each executable rather than by requiring a `PATH` entry. And it is incompatible with the Microsoft *debug* C runtime — a binary linked against it aborts inside the allocator before reaching `main` — so the sanitized Windows debug configuration links the release CRT. What that costs is the CRT's own debug heap checking, which ASan supersedes. UBSan with its runtime library does not link against the installed SDK; UBSan in trap mode does work and was verified to catch signed overflow, but reports a trap rather than a diagnostic. A UB failure observed on Windows is therefore reproduced under Linux to be diagnosed.
 
 ### Core purity
 
 **B12. The core's dependency boundary is enforced by two independent checks**, because
 either alone is defeatable:
-1. A build-system assertion that the core target resolves to no link dependencies.
+1. A build-system assertion that the core target resolves to no *declared* link dependencies. The language runtime the toolchain links implicitly is not a declared dependency and is not what this check is about; the check fails when the core's link interface names anything at all.
 2. A source scan of core translation units against a header denylist.
 
 **B13. The denylist covers determinism as well as dependencies.** `<iostream>`, `<cstdio>`, `<filesystem>`, `<chrono>`, `<random>` and `<thread>` are all standard library headers and all are forbidden in the core: the first three because the core performs no I/O, the last three because principle P11 requires the core's next state to be a function of its current state and its inputs.

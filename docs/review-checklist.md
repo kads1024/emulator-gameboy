@@ -31,23 +31,27 @@
 19. A new abstract base or virtual call: is the hardware polymorphic here, or is this for testing? (P10, ADR 0003 rule 9)
 20. New state: reachable from the root, expressible as plain data, nameable by a field-by-field serializer? Any `static`, or state living in a capture? (P12)
 
+## Targets and layout
+21. Is every added file in the target directory its content belongs to? A boundary crossing is visible as a path in the diff. (ADR 0008 (layout) rule 3)
+22. Does the core gain a type, accessor, or component that exists because a test needed it? It belongs in the test target. (ADR 0008 rule 5, P10)
+
 ## Integers
-21. A cast with an operator inside it? (ADR 0001 (toolchain) B8, B9)
-22. Narrowing that models hardware arithmetic, written as a cast instead of a named operation? (ADR 0001 B6, B7)
-23. A new accessor or decoder returning `int` rather than `u8` or `u16`? (ADR 0001 B4)
+23. A cast with an operator inside it? (ADR 0001 (toolchain) B8, B9)
+24. Narrowing that models hardware arithmetic, written as a cast instead of a named operation? (ADR 0001 B6, B7)
+25. A new accessor or decoder returning `int` rather than `u8` or `u16`? (ADR 0001 B4)
 
 ## Cartridge
-24. Anything on the read path that branches on mapper type or re-derives the mapping? (ADR 0006 (cartridge) rules 4 and 5)
-25. Mapper-specific behaviour outside the functions operating on that mapper's own variant alternative? (ADR 0006 rule 5)
-26. Derived state written into a save state rather than recomputed on load? (ADR 0006 rule 9)
+26. Anything on the read path that branches on mapper type or re-derives the mapping? (ADR 0006 (cartridge) rules 4 and 5)
+27. Mapper-specific behaviour outside the functions operating on that mapper's own variant alternative? (ADR 0006 rule 5)
+28. Derived state written into a save state rather than recomputed on load? (ADR 0006 rule 9)
 
 ## Rendering
-27. RGB values in the core, or palette application outside the PPU? (P13, `docs/scope.md` section 6)
+29. RGB values in the core, or palette application outside the PPU? (P13, `docs/scope.md` section 6)
 
 ## Performance
-28. Is the performance baseline edited? Has the cause been identified and stated? (ADR 0007 (performance floor) rules 7 and 8)
-29. Allocation, I/O, or virtual dispatch introduced on the hot path? (ADR 0002 consequences)
-30. Is an abstraction being rejected on speculation rather than on a measurement brought to the review? (ADR 0007)
+30. Is the performance baseline edited? Has the cause been identified and stated? (ADR 0007 (performance floor) rules 7 and 8)
+31. Allocation, I/O, or virtual dispatch introduced on the hot path? (ADR 0002 consequences)
+32. Is an abstraction being rejected on speculation rather than on a measurement brought to the review? (ADR 0007)
 
 ## Drift tripwires
 These are not violations. They are signals that something upstream is wrong, and the fix is upstream rather than in the diff that surfaced them.
