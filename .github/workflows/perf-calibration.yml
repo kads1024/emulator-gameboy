@@ -1,0 +1,87 @@
+# Experiment E1, defined in ADR 0007 (performance floor).
+#
+# This workflow measures the *runner*, not this project's code. The workload is
+# deliberately not the emulator, which does not exist yet. Its purpose is to answer
+# whether the ubuntu-24.04 runner class is stable enough to carry a performance gate,
+# and to produce the run count and tolerance band ADR 0007 leaves PROVISIONAL.
+#
+# It gates nothing. There is no performance job in ci.yml, because ADR 0007 forbids a
+# job that reports a pass while measuring nothing, and there is nothing to measure until
+# the emulator exists.
+#
+# ADR 0007 asks for samples "deliberately spread across different times of day", so this
+# runs on a schedule rather than on push. Each run downloads the accumulated samples,
+# adds its own, re-analyses the whole set, and writes the report to the job summary.
+# The experiment therefore reports its own progress and needs no manual collection.
+
+name: Performance calibration (E1)
+
+on:
+  schedule:
+    # Every three hours: eight samples a day, which is the analyser's minimum job count.
+    - cron: "0 */3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: perf-calibration
+  cancel-in-progress: false
+
+jobs:
+  calibrate:
+    name: calibration sample
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Build the calibration workload (release)
+        run: |
+          cmake --preset linux-gcc-release
+          cmake --build --preset linux-gcc-release --target gb_calibration
+
+      - name: Recover the accumulated samples
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p perf-results
+          url=$(curl -sSL -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts?name=calibration-samples&per_page=1" \
+            | python3 -c "import json,sys; a=json.load(sys.stdin)['artifacts']; print(a[0]['archive_download_url'] if a and not a[0]['expired'] else '')")
+          if [ -n "$url" ]; then
+            curl -sSL -H "Authorization: Bearer $GH_TOKEN" -o previous.zip "$url"
+            unzip -q -o previous.zip -d perf-results
+            echo "recovered $(ls perf-results | wc -l) previous sample(s)"
+          else
+            echo "no previous samples; this is the first"
+          fi
+
+      - name: Take this job's sample
+        run: |
+          python3 scripts/run_calibration.py \
+            --binary build/linux-gcc-release/tools/calibration/gb_calibration \
+            --runs 7 \
+            --out perf-results
+
+      - name: Analyse everything collected so far
+        run: |
+          python3 scripts/analyze_calibration.py perf-results | tee report.txt
+          {
+            echo '## Experiment E1 — calibration'
+            echo
+            echo '```'
+            cat report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Preserve the accumulated samples
+        uses: actions/upload-artifact@v4
+        with:
+          name: calibration-samples
+          path: perf-results/
+          retention-days: 90

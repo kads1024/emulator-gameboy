@@ -45,6 +45,10 @@ Dependency runs one way. Nothing the core depends on may reference anything abov
 
 The purpose of this rule is visibility rather than tidiness: a file added to the wrong place is visible in the diff, before CI runs, without anyone needing to remember which rule it violates.
 
+**A target directory may contain more than one executable.** What rule 3 fixes is the *dependency boundary* a file falls under, not the number of binaries produced within it. `tools/` is a set of tools — a headless runner, a debugger, a calibration workload — and every one of them is bound by the same rule 1 row. Requiring a separate top-level directory per executable would multiply boundaries that are all identical, which serves neither visibility nor the rule's purpose. Files under a target directory may be grouped into subdirectories for that reason; the boundary is the top-level directory they sit beneath.
+
+This was recorded when the tools directory acquired its second executable, rather than left to be settled by whoever added it.
+
 **4. Core headers live beside core sources. There is no public/private include split.** The consumable interface of the core is defined by its CMake target's usage requirements, not by which directory a header sits in.
 
 The reason is constraint 5: the test target legitimately needs the visibility a public/private split would deny it. A split that the tests must bypass makes the "public" set a fiction, and a split that the tests honour makes the tests unable to construct the machine the way ADR 0003 rule 9 requires.

@@ -12,3 +12,6 @@ roms/
 .idea/
 *.user
 compile_commands.json
+
+# Calibration samples: CI artefacts, not repository content (docs/performance-measurement.md)
+perf-results/
