@@ -82,7 +82,14 @@ These are named here, not designed. Their signatures may later be subsumed by AL
 
 **B8. A raw `static_cast` is permitted only where the converted expression contains no arithmetic and the target type is the hardware domain of the destination.** Narrowing that results from an operation the hardware performs goes through a named operation instead. A reviewer applies this by looking for an operator inside the cast, which makes it mechanical rather than a judgement about intent.
 
-**B9. Host-boundary conversions are explicit and occur at the boundary.** Conversions from emulated values (`u8`, `u16`) to host indexing or sizing types (`std::size_t`, container `size_type`, span indices, allocation sizes) occur only in the expression that crosses into the host facility. Arithmetic is completed in the emulated domain before the conversion. A reviewer applies this by checking that the cast's operand is a named emulated value rather than an arithmetic expression.
+**B9. Host-boundary conversions are explicit, occur at the boundary, and contain no arithmetic in the cast operand.** A conversion from an emulated value (`u8`, `u16`) to a host indexing or sizing type (`std::size_t`, container `size_type`, span index, allocation size) appears only in the expression that crosses into the host facility, and its operand is a named emulated value, never an arithmetic expression.
+
+Which domain arithmetic belongs to follows from the range of the result, not from the position of the cast:
+
+- Arithmetic whose result is *defined* by the emulated domain's wrap (incrementing an address across a 16-bit read, `HL + e8`, stack pointer adjustment) is performed in the emulated domain, and the wrapped result is what gets converted.
+- Arithmetic whose result legitimately exceeds the emulated domain's range (a bank offset resolved against a multi-megabyte ROM image (ADR 0006)) is performed in the host domain, *after* the conversion, on operands that are already host-domain values.
+
+A reviewer applies this by checking that no operator appears inside the cast, which is the same check as B8.
 
 A storage-indexing helper would eliminate most such conversions by centralising the boundary. This is recorded as a Milestone 2 observation rather than a commitment.
 
@@ -116,3 +123,62 @@ either alone is defeatable:
 The justification is brief because the choice is reversible: it integrates with CTest at per-test-case granularity, which matters for a per-opcode suite where a failure should name the opcode; it has matchers suitable for comparing structured values such as machine state and framebuffers; and it emits CI-consumable report formats without additional work. It also does not bring a mocking framework into the tree, which suits a project that tests against concrete types rather than interfaces. doctest is the runner-up on build time, and switching is mechanical.
 
 **B18. The framework links to tests only, never to the core.** The purity checks in B12 enforce this; the framework's presence in the build is not an exception to them.
+
+## Alternatives considered
+
+### Alternative 1: Conversion warnings not treated as errors
+
+The alternative is to keep `-Wconversion` and `-Wsign-conversion` enabled but non-fatal, or to omit them entirely.
+
+Treating them as warnings reduces friction in the short term but weakens the enforcement mechanism. The failure mode is not that developers consciously choose to ignore a specific warning. It is that the warning count ceases to be a useful signal. A new warning appears, the build still succeeds, and work continues. Additional warnings accumulate. Once the count is non-zero by default, determining whether a particular warning is new requires manual inspection rather than being answered by the build result. The signal is therefore mixed with historical noise, and the practical effect is that new warnings stop being reviewed consistently.
+
+Dropping `-Wconversion` entirely would likely not cause immediate correctness failures in many cases. The SM83 core is validated against reference traces and test ROMs, and many unintended truncations would eventually surface as behavioural mismatches. The rule's primary justification is therefore not bug-catching. It is semantic visibility.
+
+The conversion survey established that many operations performed by the hardware are represented in C++ through integer promotion followed by narrowing. Without a convention, a reader cannot distinguish between an intentional hardware-domain operation and an accidental truncation. B6 and B8 exist to make that distinction explicit. The value of the rule is that arithmetic which intentionally wraps, narrows, or crosses domains becomes visible in the source and reviewable as a design choice rather than merely accepted because a cast compiled.
+
+This alternative was rejected because the project's conversion convention depends on warnings being enforceable. A warning that does not block progress eventually becomes documentation rather than policy.
+
+### Alternative 2: Core purity by convention
+
+The alternative is to rely on review discipline rather than mechanical enforcement.
+
+The likely failure sequence is gradual. A deadline creates pressure to inspect state, write a quick diagnostic, or access a host facility. A translation unit gains a forbidden include. The change is reviewed in the context of the immediate task and merged. Nothing fails because the build system does not check for purity. Subsequent code begins using the newly available facility because it is already present. Additional dependencies accumulate around it. The architectural boundary has now moved, but no explicit decision recorded the move.
+
+The delay before discovery may be substantial. The first visible symptom may occur weeks or months later when a new requirement depends on the core remaining pure and deterministic. By that point the dependency has become part of the design rather than a single line that can be removed.
+
+Several other project decisions silently depend on core purity:
+
+* ADR 0002's timing model assumes that advancing the machine state depends only on machine state and inputs, not on host facilities.
+* ADR 0006's cartridge representation assumes cartridge behaviour is expressed through machine state transitions rather than external services.
+* ADR 0007's memory-map decisions assume memory accesses remain within the emulated machine model rather than acquiring host-side behaviour.
+* Save-state requirements depend on the complete machine state being serialisable and restorable without hidden external dependencies.
+
+A purity rule enforced only by convention therefore weakens multiple architectural decisions simultaneously. The mechanical checks in B12 exist because those downstream decisions depend on purity being a property of the build, not of reviewer diligence.
+
+This alternative was rejected because the cost of enforcement is small and the consequences of accidental boundary erosion are delayed and difficult to localise.
+
+### Alternative 3: A build system other than CMake
+
+The alternative is to use another build system such as Meson, Premake, handwritten build scripts, or compiler-specific project files.
+
+The project's requirements are modest: multiple compilers, multiple configurations, CI integration, test execution, and dependency acquisition. Several build systems can satisfy them. The choice is therefore largely operational rather than architectural.
+
+This alternative was rejected because CMake is already available on both development environments, integrates naturally with CTest, supports the required compiler matrix, and is widely supported by tooling. The decision is reversible and does not materially affect the emulator architecture.
+
+### Alternative 4: Windows-only development
+
+The alternative is to perform all development and validation on Windows and remove the Linux leg.
+
+This is attractive because it is the path of least resistance on the development machine. It removes WSL setup, eliminates a second compiler invocation, and keeps all work in a single environment.
+
+However, two measured limitations exist.
+
+First, the conversion survey established that clang and GCC do not diagnose the same expressions. Several patterns warned only under GCC, while others warned only under clang. A Windows-only workflow would therefore remove one of the enforcing compilers and weaken B3.
+
+Second, full UBSan diagnostics are not currently available on the measured Windows environment. UBSan runtime mode fails to link against the installed SDK, while Linux provides working runtime diagnostics. A Windows-only workflow therefore loses the project's authoritative undefined-behaviour diagnosis path.
+
+This alternative was rejected because it removes two independently useful validation mechanisms that have already been shown to catch different classes of problems.
+
+The chosen path carries real daily friction. Every change must compile under two enforcing compilers, developers must occasionally switch environments to diagnose undefined behaviour, and the conversion policy requires deliberate handling of arithmetic that would otherwise compile silently. A solo developer could reasonably choose Alternative 1 or Alternative 4 to reduce that friction.
+
+The benefit of the chosen path is not that it finds every bug earlier. The benefit is that it turns architectural rules into mechanically enforced constraints. The project pays a small cost on every change so that violations are discovered immediately rather than after they have become part of the design.
