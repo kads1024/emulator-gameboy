@@ -1,0 +1,14 @@
+# Build trees (ADR 0008 rule 6: fetched artefacts never land in a source directory)
+build/
+out/
+.cache/
+
+# Fetched test ROMs (docs/scope.md section 7: never committed)
+roms/
+
+# Editor and OS noise
+.vs/
+.vscode/
+.idea/
+*.user
+compile_commands.json
