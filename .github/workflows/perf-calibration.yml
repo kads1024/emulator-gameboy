@@ -50,16 +50,41 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p perf-results
-          url=$(curl -sSL -H "Authorization: Bearer $GH_TOKEN" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts?name=calibration-samples&per_page=1" \
-            | python3 -c "import json,sys; a=json.load(sys.stdin)['artifacts']; print(a[0]['archive_download_url'] if a and not a[0]['expired'] else '')")
-          if [ -n "$url" ]; then
-            curl -sSL -H "Authorization: Bearer $GH_TOKEN" -o previous.zip "$url"
-            unzip -q -o previous.zip -d perf-results
-            echo "recovered $(ls perf-results | wc -l) previous sample(s)"
-          else
+
+          # Each run uploads the cumulative set, so the newest artefact is the one to
+          # recover. The API's ordering is not documented as guaranteed, and picking the
+          # wrong one would silently discard samples and let the analysis proceed on a
+          # subset - a quiet data loss rather than a failure. So the newest is selected
+          # explicitly, by created_at.
+          curl -sSL -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts?name=calibration-samples&per_page=100" \
+            > artifacts.json
+          url=$(python3 -c "
+          import json
+          artifacts = [a for a in json.load(open('artifacts.json'))['artifacts'] if not a['expired']]
+          artifacts.sort(key=lambda a: a['created_at'], reverse=True)
+          print(artifacts[0]['archive_download_url'] if artifacts else '')
+          ")
+
+          if [ -z "$url" ]; then
             echo "no previous samples; this is the first"
+            echo "RECOVERED=0" >> "$GITHUB_ENV"
+            exit 0
           fi
+
+          curl -sSL -H "Authorization: Bearer $GH_TOKEN" -o previous.zip "$url"
+          unzip -q -o previous.zip -d perf-results
+          recovered=$(find perf-results -name 'calibration-*.json' | wc -l)
+          echo "recovered $recovered previous sample(s)"
+
+          # An artefact that existed but yielded nothing means the dataset just reset
+          # itself. Continuing would produce an analysis of one sample that looks like a
+          # legitimate result.
+          if [ "$recovered" -eq 0 ]; then
+            echo "::error::an artefact was found but no samples were recovered from it"
+            exit 1
+          fi
+          echo "RECOVERED=$recovered" >> "$GITHUB_ENV"
 
       - name: Take this job's sample
         run: |
@@ -70,6 +95,8 @@ jobs:
 
       - name: Analyse everything collected so far
         run: |
+          total=$(find perf-results -name 'calibration-*.json' | wc -l)
+          echo "dataset: ${RECOVERED:-0} recovered + 1 from this job = $total sample(s)"
           python3 scripts/analyze_calibration.py perf-results | tee report.txt
           {
             echo '## Experiment E1 — calibration'
