@@ -63,7 +63,16 @@ The reason is constraint 5: the test target legitimately needs the visibility a 
 
 A single target would simplify the initial project setup, but it would destroy the architectural boundary that ADR 0001 B12 is intended to enforce. The first check (that the core resolves to no link dependencies) would no longer have a distinct target to inspect, so the core could silently acquire third-party or platform dependencies while still producing a successful build.
 
-That loss propagates downstream. The dependency direction between core and the rest of the system would no longer be mechanically enforceable; the frontend could become a dependency of code that should remain platform-independent; and the test framework could become transitively available to the core. The purity checks described in ADR 0001 Alternative 2 therefore stop being meaningful because there is no longer a separately identifiable core boundary to check.
+That loss propagates downstream. The dependency direction between core and the rest of the system would no longer be mechanically enforceable; the frontend could become a dependency of code that should remain platform-independent; and the test framework could become transitively available to the core. The purity checks described in ADR 0001 Alternative 2 therefore stop being meaningful, because there is no longer a separately identifiable core boundary to check.
+
+Those checks are what several later decisions rest on:
+
+* ADR 0002 (timing model) assumes that advancing the machine depends only on machine state and inputs. A core that can reach platform code can advance on something else.
+* ADR 0006 (cartridge) assumes real-world time enters as a parameter rather than as a call, the RTC being the machine's only host-time input. An unchecked core makes a direct clock call available anywhere.
+* ADR 0007 (performance floor) assumes the measured workload is deterministic. Without that, run-to-run variation can no longer be attributed to host noise, and the gate stops separating regressions from scheduling.
+* The save-state requirements assume complete machine state with no hidden external dependencies. Any acquired dependency that holds state is state the save file does not contain.
+
+None of these fail at the moment the boundary is lost. They fail later, as a timing bug, a benchmark that will not settle, or a save state that does not restore, with no build failure to connect any of them back to the layout. That is what makes target structure an architectural question rather than a cosmetic one.
 
 ### Alternative 2: A public/private include split
 
@@ -77,4 +86,49 @@ Separate repositories would weaken the atomicity of changes that cross the core,
 
 This is a mechanical cost, not merely a workflow preference.
 
-The chosen four-target layout therefore costs more initial structure than a solo project strictly needs: four targets must be configured before the emulator exists, and genuinely shared code that belongs to neither a target nor the core has no automatic home. That cost is accepted because the targets make the architectural dependency boundaries explicit and mechanically enforceable. Internal file organization remains implementation detail and can be changed without revisiting this ADR.
+A reasonable solo engineer starting this repository would pick the single target, since it is the lowest-friction start and nothing in an empty repository is yet leaning on the boundary it removes. The chosen four-target layout therefore costs more initial structure than a solo project strictly needs: four targets must be configured before the emulator exists, and genuinely shared code that belongs to neither a target nor the core has no automatic home. That cost is accepted because the targets make the architectural dependency boundaries explicit and mechanically enforceable. Internal file organization remains implementation detail and can be changed without revisiting this ADR.
+
+## Consequences
+
+### The purity assertion has a subject
+
+ADR 0001 (toolchain) B12's first check asserts that a target resolves to no link dependencies. This layout is what makes "a target" well defined. The check and this ADR are two halves of one mechanism, and neither is useful alone.
+
+### A misplaced file is visible before CI runs
+
+Rule 3 ties a file's target to its directory, so a source file that has drifted across a boundary appears in the diff as a path, not as a build failure ten minutes later. This is the cheapest form of enforcement available and it costs nothing to maintain.
+
+### The tests see everything, so the discipline moves to the test target
+
+Rule 4 gives the test target full visibility of the core, which is what ADR 0003 (ownership) rule 9 requires. The risk that comes with it is core code shaped by test convenience rather than by hardware. The tripwire: a type or accessor in the core that exists only because a test needed it. Rule 5 is the answer, and the fix is to move the thing into the test target rather than to justify its presence in the core.
+
+### Code shared by two targets and belonging to neither has no home, deliberately
+
+If the tools and the frontend both need something that is not part of the machine, this layout offers nowhere obvious to put it. That is intentional. The answer is to leave it duplicated until a third user justifies a target of its own, rather than to create a utility target on first contact. A shared-utility target added early accumulates everything that is awkward to place, and its dependency set is the one nobody watches.
+
+### The frontend can grow without touching the core's dependency set
+
+Because dependency runs one way, adding a graphics or audio library to the frontend cannot alter what the core links. The purity assertion stays trivially true as the frontend acquires whatever it needs, which is what makes the frontend's dependencies a non-issue rather than a standing risk.
+
+### Four targets exist before any emulator code does
+
+The configuration cost is paid up front, before there is anything to run. This is accepted for the same reason the CI guards are built before the code they guard: a boundary introduced after the code exists is a boundary that already has violations.
+
+## Status
+
+### Classification
+- **Target boundaries and the dependency direction between them:** BLOCKING ARCHITECTURAL DECISION: accepted.
+- **Everything else about layout:** IMPLEMENTATION DETAIL. Changing it requires no ADR and is not a review topic.
+
+### What would reopen the include-split decision
+
+The core acquiring a consumer outside this repository. Rule 4 rests on there being no external boundary to protect and on the test target needing full visibility; an external consumer changes the first of those and the tradeoff flips. Until that happens, the split is not designed for preemptively.
+
+### What would reopen the target set
+
+A product-level change that introduces a second machine-level artefact, not a new tool or a second frontend, both of which fit the existing set, but something that is neither the machine nor a consumer of it.
+
+### Review triggers
+
+- The build setup step, when the targets are created and the purity assertion is wired to the core target for the first time.
+- The first time code appears that plausibly belongs to two targets and to neither, which tests whether the duplication rule survives contact
