@@ -148,9 +148,9 @@ The delay before discovery may be substantial. The first visible symptom may occ
 
 Several other project decisions silently depend on core purity:
 
-* ADR 0002's timing model assumes that advancing the machine state depends only on machine state and inputs, not on host facilities.
-* ADR 0006's cartridge representation assumes cartridge behaviour is expressed through machine state transitions rather than external services.
-* ADR 0007's memory-map decisions assume memory accesses remain within the emulated machine model rather than acquiring host-side behaviour.
+* ADR 0002 (timing model) assumes that advancing the machine state depends only on machine state and inputs, not on host facilities.
+* ADR 0006 (cartridge representation) assumes real-world time enters the cartridge as an explicit parameter and is never read from the host. The RTC is the machine's only host-time input, and purity is what keeps it a parameter rather than a call.
+* ADR 0007 (performance floor) assumes the measured workload is deterministic, which is why `<chrono>` and `<random>` sit on B13's denylist alongside the I/O headers. If purity erodes, run-to-run variation stops being host noise and the gate loses its meaning.
 * Save-state requirements depend on the complete machine state being serialisable and restorable without hidden external dependencies.
 
 A purity rule enforced only by convention therefore weakens multiple architectural decisions simultaneously. The mechanical checks in B12 exist because those downstream decisions depend on purity being a property of the build, not of reviewer diligence.
@@ -182,3 +182,55 @@ This alternative was rejected because it removes two independently useful valida
 The chosen path carries real daily friction. Every change must compile under two enforcing compilers, developers must occasionally switch environments to diagnose undefined behaviour, and the conversion policy requires deliberate handling of arithmetic that would otherwise compile silently. A solo developer could reasonably choose Alternative 1 or Alternative 4 to reduce that friction.
 
 The benefit of the chosen path is not that it finds every bug earlier. The benefit is that it turns architectural rules into mechanically enforced constraints. The project pays a small cost on every change so that violations are discovered immediately rather than after they have become part of the design.
+
+## Consequences
+
+### Both enforcing compilers are part of the local workflow
+WSL is not optional tooling. A change is not finished when it compiles under clang; the conversion survey established that clang and GCC disagree by expression, so the second compiler is part of the definition of done rather than a CI formality. In practice this means a way to invoke both from one command, so the discipline does not depend on remembering.
+
+### Ninja must be installed before any build work
+It is absent from both environments today. This is a concrete prerequisite of the build step, not a detail to be discovered when the first preset fails to configure.
+
+### Helper proliferation is a diagnostic, not a nuisance
+B4 confines the named operations to mixed-width and multi-operand arithmetic. If helpers begin appearing in ordinary binary 8-bit arithmetic, the cause is almost certainly an interface returning `int` somewhere upstream, because that is precisely what removes the compilers' same-type exemption. The helper count is therefore a canary for B4 drift, and the response is to fix the interface rather than to add helpers.
+
+### The core cannot print, so its diagnostics are data
+Principle P14 requires unimplemented behaviour to be loud, and B13 forbids the core from using any facility that could print. These are compatible, and the resolution follows from the constraint: the core records what it encountered as state its owner can read, and the tools and frontend do the reporting. This closes the mechanism ADR 0005 deferred, what P14's loudness consists of in a core that cannot perform I/O.
+
+### A compiler upgrade can break the build, deliberately
+Warnings as errors under two compilers means a new release of either can fail a build that passed yesterday, because new diagnostics appear in new versions. Compiler versions are therefore pinned in CI, and upgrading one is a deliberate change reviewed on its own rather than an ambient event.
+
+### The first configure requires network access
+
+The test framework is fetched at configure time and verified by hash. CI caches it; a developer working offline needs a populated cache. This is a small operational cost of not vendoring, accepted because a pinned, hash-verified fetch keeps the dependency out of the repository and its provenance checkable.
+
+### Undefined behaviour on Windows arrives without a message
+
+Trap-mode UBSan produces a trap and a debugger stop, not a diagnostic. Reproducing under Linux is therefore a documented step in the debugging workflow rather than folklore, and belongs in the contributor documentation when it is written.
+
+### clang-tidy initially enforces little
+
+Its check set is tuned against real code, so at the outset it contributes less than the warning set does. This is accepted: a check set chosen before the code exists would be either uselessly permissive or an obstacle course, and neither is worth the time it costs to configure now.
+
+## Status
+
+### Classification
+
+- **Language standard, compilers, build system, and configurations:** BLOCKING ARCHITECTURAL DECISION: accepted.
+- **Inclusion of the MSVC front end in the compiler matrix:** PROVISIONAL.
+
+### Adjudication of the MSVC question
+
+The MSVC front end is added to the matrix if a defect reaches CI or a released branch that the MSVC front end would have detected and that both enforcing compilers accepted. Absent such a defect, front-end diversity is not purchased at the cost of a compiler that cannot enforce this project's conversion rule.
+
+### What would reopen the other decisions
+
+- **The language standard** is reopened by ADR 0005's recorded trigger, a standard providing `std::expected` becoming available across the whole matrix.
+- **The test framework** is reopened if build time becomes a routine obstacle, measured rather than felt. Switching is mechanical and the choice was made on that basis.
+- **The Windows UBSan link failure** may be revisited if the runtime mismatch is resolved upstream. The current behaviour is recorded as measured, and the decision does not depend on it changing.
+
+### Review triggers
+
+- The build setup step: Ninja installed, presets written, both compilers invocable locally.
+- The first CI pipeline: the compiler matrix running, and the purity check demonstrated failing on a planted violation before it is trusted.
+- The CPU milestone: the helper signatures, and whether they are subsumed by ALU operations returning flags. 
