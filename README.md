@@ -1,6 +1,6 @@
 # Game Boy emulator
 
-A cycle-accurate emulator for the original Game Boy — the Sharp DMG, and nothing else.
+A cycle-accurate emulator for the original Game Boy: the Sharp DMG, and nothing else.
 
 **There is no emulator yet.** What exists is the foundation it will be built on: the
 build, the guards that enforce the architecture, and the decision record that explains
@@ -9,11 +9,11 @@ overstates its state wastes the reader's time.
 
 ## Status
 
-Milestone 1 — foundation and contracts.
+Milestone 1: foundation and contracts.
 
 | Exists | Does not exist |
 |---|---|
-| Four-target build with one-way dependency | CPU, bus, PPU, timer, APU — any emulation at all |
+| Four-target build with one-way dependency | CPU, bus, PPU, timer, APU, any emulation at all |
 | CI on clang and GCC, debug and release | A performance gate (there is nothing to measure) |
 | Core dependency-purity checks, with a test proving they reject a violation | Test ROM integration in CI |
 | Test artefact manifest with an audited licence for every suite | |
@@ -77,7 +77,7 @@ The architecture is enforced mechanically rather than remembered:
 
 ## Test ROMs
 
-None are distributed with this project, and none are committed to it — including the
+None are distributed with this project, and none are committed to it, including the
 permissively licensed ones, because a uniform rule needs no per-suite reasoning at the
 moment somebody is tempted.
 
@@ -90,7 +90,7 @@ any release artefact.
 
 ## Licence
 
-MIT — see [`LICENSE`](LICENSE).
+MIT: see [`LICENSE`](LICENSE).
 
 That covers this project's own code and documentation. It does **not** cover the external
 test artefacts the fetch script downloads: those carry their own terms, one of them
