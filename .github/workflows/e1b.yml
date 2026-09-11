@@ -14,10 +14,19 @@
 name: Performance calibration E1b (two-workload)
 
 on:
-  schedule:
-    # Off the top of the hour: :00 is the most contended minute on the platform, and the
-    # E1 series was observed missing ticks there.
-    - cron: "23 */3 * * *"
+  # SCHEDULE TEMPORARILY DISABLED.
+  #
+  # The first E1b execution is to be a deliberate manual dispatch, not a cron tick, so
+  # that the first job is an observed integration exercise rather than an uncontrolled
+  # sample entering the dataset. Accumulation begins only once that decision is taken
+  # explicitly.
+  #
+  # Restore by uncommenting the two lines below exactly as they stand; the cadence was
+  # chosen off the top of the hour because :00 is the most contended minute on the
+  # platform, and the E1 series was observed missing ticks there.
+  #
+  # schedule:
+  #   - cron: "23 */3 * * *"
   workflow_dispatch:
 
 permissions:
