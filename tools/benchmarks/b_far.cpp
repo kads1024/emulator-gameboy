@@ -169,8 +169,13 @@ int main(int argc, char** argv) try {
     std::printf("  \"workload\": \"b_far\",\n");
     std::printf("  \"condition\": \"%s\",\n", regressed ? "reg" : "null");
     std::printf("  \"iterations\": %llu,\n", static_cast<unsigned long long>(iterations));
+    // The cast widens an operand, not the product. Casting the product instead is what
+    // bugprone-misplaced-widening-cast flags: where size_t is 64-bit but distinct from
+    // unsigned long long (LP64, i.e. Linux), the cast is either ineffective or, on a
+    // narrower size_t, applied after the multiplication has already overflowed.
+    // Multiplying in the wide type makes the question moot.
     std::printf("  \"working_set_bytes\": %llu,\n",
-                static_cast<unsigned long long>(kEntries * sizeof(std::uint64_t)));
+                static_cast<unsigned long long>(kEntries) * sizeof(std::uint64_t));
     std::printf("  \"checksum\": \"0x%016llX\",\n", static_cast<unsigned long long>(checksum));
     std::printf("  \"checksum_stable\": %s,\n", checksum_stable ? "true" : "false");
     std::printf("  \"runs_ns\": [");
