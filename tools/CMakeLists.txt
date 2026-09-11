@@ -5,4 +5,5 @@
 # produced within it, so this directory hosts one executable per subdirectory and they
 # all share the same row of rule 1's table.
 
+add_subdirectory(benchmarks)
 add_subdirectory(calibration)

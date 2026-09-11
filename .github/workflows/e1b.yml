@@ -1,0 +1,111 @@
+# Experiment E1b: does the calibrated ratio remove enough cross-host variation for a
+# target-side regression to be separable?
+#
+# Separate from perf-calibration.yml on purpose. The E1 series and its artifact are left
+# untouched, so the two datasets cannot contaminate each other.
+#
+# This workflow gates nothing. It adds no performance job to CI, and it produces no
+# threshold. The eventual gate policy is a post-E1b decision.
+#
+# Design inputs, not measurements: N = 5 rounds per job, 16 jobs initially, a nominal
+# +5% injected effect defined on iteration count. The realised runtime effect is
+# measured, never assumed.
+
+name: Performance calibration E1b (two-workload)
+
+on:
+  schedule:
+    # Off the top of the hour: :00 is the most contended minute on the platform, and the
+    # E1 series was observed missing ticks there.
+    - cron: "23 */3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: perf-e1b
+  cancel-in-progress: false
+
+jobs:
+  e1b:
+    name: E1b sample
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Build the workloads (release)
+        run: |
+          cmake --preset linux-gcc-release
+          cmake --build --preset linux-gcc-release \
+            --target gb_calibration gb_b_near gb_b_far
+
+      - name: Recover the accumulated samples
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p e1b-results
+
+          # Newest non-expired artifact, selected explicitly by created_at. The API's
+          # ordering is not documented as guaranteed, and picking the wrong one would
+          # silently discard jobs and let the analysis proceed on a subset.
+          curl -sSL -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts?name=e1b-samples&per_page=100" \
+            > artifacts.json
+          url=$(python3 -c "
+          import json
+          artifacts = [a for a in json.load(open('artifacts.json'))['artifacts'] if not a['expired']]
+          artifacts.sort(key=lambda a: a['created_at'], reverse=True)
+          print(artifacts[0]['archive_download_url'] if artifacts else '')
+          ")
+
+          if [ -z "$url" ]; then
+            echo "no previous E1b jobs; this is the first"
+            echo "RECOVERED=0" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          curl -sSL -H "Authorization: Bearer $GH_TOKEN" -o previous.zip "$url"
+          unzip -q -o previous.zip -d e1b-results
+          recovered=$(find e1b-results -name 'e1b-*.json' | wc -l)
+          echo "recovered $recovered previous job(s)"
+          if [ "$recovered" -eq 0 ]; then
+            echo "::error::an artifact was found but no job records were recovered from it"
+            exit 1
+          fi
+          echo "RECOVERED=$recovered" >> "$GITHUB_ENV"
+
+      - name: Run this job's E1b protocol
+        run: |
+          python3 scripts/run_e1b.py \
+            --calibration build/linux-gcc-release/tools/calibration/gb_calibration \
+            --b-near      build/linux-gcc-release/tools/benchmarks/gb_b_near \
+            --b-far       build/linux-gcc-release/tools/benchmarks/gb_b_far \
+            --out         e1b-results
+
+      - name: Analyse everything collected so far
+        run: |
+          total=$(find e1b-results -name 'e1b-*.json' | wc -l)
+          echo "dataset: ${RECOVERED:-0} recovered + 1 from this job = $total job(s)"
+          python3 scripts/analyze_e1b.py e1b-results | tee report.txt
+          {
+            echo '## Experiment E1b — two-workload calibrated ratio'
+            echo
+            echo "Jobs collected: $total (initial target 16; interim look at 8 is"
+            echo "descriptive, not a stopping boundary)."
+            echo
+            echo '```'
+            cat report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Preserve the accumulated samples
+        uses: actions/upload-artifact@v4
+        with:
+          name: e1b-samples
+          path: e1b-results/
+          retention-days: 90

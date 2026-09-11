@@ -15,3 +15,10 @@ compile_commands.json
 
 # Calibration samples: CI artefacts, not repository content (docs/performance-measurement.md)
 perf-results/
+
+# E1b job records: CI artefacts, not repository content
+e1b-results/
+
+# Python bytecode from scripts/
+__pycache__/
+*.pyc
